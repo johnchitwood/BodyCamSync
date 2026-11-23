@@ -323,7 +323,7 @@
 
   function undoLast() {
     const log = TR.review.log;
-    const undoable = (x) => x.kind === 'voice' || (x.prev !== undefined && x.key);
+    const undoable = (x) => x.kind === 'voice' || x.kind === 'merge' && x.snap || (x.prev !== undefined && x.key);
     let i = log.length - 1;
     while (i >= 0 && !undoable(log[i])) i--;
     if (i < 0) { C().toast('Nothing to undo'); return false; }
@@ -333,7 +333,12 @@
     for (let j = group.length - 1; j >= 0; j--) {
       const x = group[j];
       log.splice(log.indexOf(x), 1);
-      if (x.kind === 'voice') TR.review.clusters[x.gk] = JSON.parse(x.prevClusters);
+      if (x.kind === 'merge') {
+        const sn = x.snap;
+        if (!TR.review.people.some((p) => p.id === sn.person.id)) TR.review.people.splice(Math.min(sn.at, TR.review.people.length), 0, sn.person);
+        for (const [gk, c] of sn.clusters) if (TR.review.clusters[gk]) TR.review.clusters[gk][c] = sn.person.id;
+        for (const [key, ed] of sn.lines) TR.review.lines[key] = ed;
+      } else if (x.kind === 'voice') TR.review.clusters[x.gk] = JSON.parse(x.prevClusters);
       else if (x.prev === null) delete TR.review.lines[x.key];
       else TR.review.lines[x.key] = x.prev;
     }
@@ -506,7 +511,7 @@
   function acceptMatch(s, name) {
     const [ga, ca] = parseNode(s.a), [gb, cb] = parseNode(s.b);
     const pa = realPersonOf(ga, ca), pb = realPersonOf(gb, cb);
-    if (pa && pb && pa.id !== pb.id && !window.confirm(`Merge “${pb.name}” into “${pa.name}”? Both are already named.`)) return;
+    // merging two named people is reversible (Undo in the notice), so no confirmation
     TR._batch = 'm' + Date.now().toString(36);
     try {
       if (pa && pb) { if (pa.id !== pb.id) mergePeople(pb.id, pa.id); }
@@ -522,7 +527,7 @@
         if (created) { const mine = TR.review.log.filter((x) => x.batch === TR._batch); if (mine[0]) mine[0].createdPerson = p.id; }
       }
     } finally { TR._batch = null; }
-    C().toast('Matched · ⌘Z to undo');
+    C().toast(pa && pb && pa.id !== pb.id ? `Merged “${pb.name}” into “${pa.name}”` : 'Matched', 8000, { label: 'Undo', fn: undoLast });
   }
   function dismissMatch(s) { TR.review.dismissed.push(s.k); persist(); fillPeople(); }
   function hearMatch(s) {
@@ -620,11 +625,16 @@
   }
   function mergePeople(fromId, intoId) {
     const from = personById(fromId), into = personById(intoId); if (!from || !into) return;
-    for (const gk of Object.keys(TR.review.clusters)) for (const c of Object.keys(TR.review.clusters[gk])) if (TR.review.clusters[gk][c] === fromId) TR.review.clusters[gk][c] = intoId;
-    for (const ed of Object.values(TR.review.lines)) { if (ed.person === fromId) ed.person = intoId; if (ed.parts) ed.parts.forEach((p) => { if (p.person === fromId) p.person = intoId; }); }
+    const snap = { person: JSON.parse(JSON.stringify(from)), at: TR.review.people.findIndex((p) => p.id === fromId), clusters: [], lines: [] };
+    for (const gk of Object.keys(TR.review.clusters)) for (const c of Object.keys(TR.review.clusters[gk])) if (TR.review.clusters[gk][c] === fromId) { snap.clusters.push([gk, c]); TR.review.clusters[gk][c] = intoId; }
+    for (const [key, ed] of Object.entries(TR.review.lines)) {
+      if (ed.person === fromId || (ed.parts && ed.parts.some((p) => p.person === fromId))) snap.lines.push([key, JSON.parse(JSON.stringify(ed))]);
+      if (ed.person === fromId) ed.person = intoId; if (ed.parts) ed.parts.forEach((p) => { if (p.person === fromId) p.person = intoId; });
+    }
     TR.review.people = TR.review.people.filter((p) => p.id !== fromId);
-    TR.review.log.push({ at: Date.now(), kind: 'merge', key: '', t: 0, cam: '', from: from.name, to: into.name });
-    persist(); afterChange(); C().toast(`Merged “${from.name}” into “${into.name}”`);
+    TR.review.log.push({ at: Date.now(), kind: 'merge', key: '', t: 0, cam: '', from: from.name, to: into.name, snap, batch: TR._batch || undefined });
+    persist(); afterChange();
+    if (!TR._batch) C().toast(`Merged “${from.name}” into “${into.name}”`, 8000, { label: 'Undo', fn: undoLast });
   }
   function removePerson(id) {
     const p = personById(id); if (!p) return;
@@ -858,5 +868,5 @@
   });
 
   window.BCS = window.BCS || {};
-  window.BCS.transcript = { reset, load, panel, markNow, TR, buildLines, exportText };
+  window.BCS.transcript = { reset, load, panel, markNow, TR, buildLines, exportText, mergePeople, undoLast };
 })();

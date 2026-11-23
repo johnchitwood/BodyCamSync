@@ -31,12 +31,28 @@
   };
   const signed = (t) => (t >= 0 ? '+' : '−') + hms(Math.abs(t), true);
 
-  let toastTimer = 0;
-  function toast(msg, ms = 4200) {
+  let toastTimer = 0, toastHide = 0;
+  function hideToast() {
+    const el = $('#toast'); clearTimeout(toastTimer);
+    el.classList.add('leaving');
+    toastHide = setTimeout(() => { el.hidden = true; el.classList.remove('leaving'); }, 180);
+  }
+  // action: { label, fn } adds a button (e.g. Undo). Clicking the notice or pressing its ✕ dismisses it.
+  function toast(msg, ms = 4200, action) {
     const el = $('#toast');
-    el.textContent = msg; el.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+    clearTimeout(toastTimer); clearTimeout(toastHide);
+    el.classList.remove('leaving');
+    el.textContent = '';
+    const t = document.createElement('span'); t.className = 'toast-msg'; t.textContent = msg; el.append(t);
+    if (action) {
+      const b = document.createElement('button'); b.className = 'toast-act'; b.textContent = action.label;
+      b.onclick = () => { hideToast(); action.fn(); };
+      el.append(b);
+    }
+    const x = document.createElement('button'); x.className = 'toast-x'; x.setAttribute('aria-label', 'Dismiss'); x.textContent = '×'; x.onclick = hideToast;
+    el.append(x);
+    el.hidden = false;
+    toastTimer = setTimeout(hideToast, ms);
   }
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const throttle = (fn, ms) => { let t = 0, pend = false; return (...a) => { if (t) { pend = true; return; } fn(...a); t = setTimeout(() => { t = 0; if (pend) { pend = false; fn(...a); } }, ms); }; };
@@ -95,11 +111,14 @@
         const f = document.createElement('button');
         f.className = 'btn small'; f.textContent = `Free up ${bytes(r.proxyBytes)}`;
         f.title = 'Removes the local video copies for this case. Your original files are not touched, and the copies can be rebuilt later.';
-        f.onclick = async () => {
-          if (!window.confirm(`Remove the local video copies for “${r.name}”?\n\nThis frees about ${bytes(r.proxyBytes)}. Your original files are not touched. The case will play from the originals (slower seeking) until copies are rebuilt.`)) return;
-          await bcs.invoke('proxy:remove', r.id);
-          toast(`Freed ${bytes(r.proxyBytes)}`);
-          loadRecents();
+        f.onclick = () => {
+          const box = document.createElement('span'); box.className = 'inline-confirm';
+          box.innerHTML = `<span>Remove copies? Originals stay untouched.</span>`;
+          const keep = document.createElement('button'); keep.className = 'btn small ghost'; keep.textContent = 'Keep';
+          const go = document.createElement('button'); go.className = 'btn small primary'; go.textContent = `Remove ${bytes(r.proxyBytes)}`;
+          keep.onclick = () => { box.replaceWith(f); f.focus(); };
+          go.onclick = async () => { go.disabled = true; await bcs.invoke('proxy:remove', r.id); toast(`Freed ${bytes(r.proxyBytes)}`); loadRecents(); };
+          box.append(keep, go); f.replaceWith(box); keep.focus();
         };
         row.append(f);
       }
@@ -156,12 +175,18 @@
     const upd = () => { const t = total(); $('#free-total').textContent = t ? `Frees about ${bytes(t)}` : 'Nothing selected'; $('#free-go').disabled = !t; };
     $$('input[type=checkbox]', panel).forEach((cb) => { cb.onchange = () => { S.freeSel[cb.dataset.id][cb.dataset.k] = cb.checked; if (cb.dataset.k === 'audio') renderFreePanel(); else upd(); }; });
     $('#free-cancel').onclick = () => { S.freeOpen = false; renderFreePanel(); };
-    $('#free-go').onclick = async () => {
+    $('#free-go').onclick = () => {
       const t = total(); if (!t) return;
       const chosen = list.filter((r) => { const p = parts(r); return p.shrink || p.proxies || p.audio; });
       const shrinkIds = chosen.filter((r) => parts(r).shrink).map((r) => r.id);
-      const msg = `Free up about ${bytes(t)} across ${chosen.length} case${chosen.length === 1 ? '' : 's'}?\n\nYour original videos, transcripts, speaker names and edits are not touched.${shrinkIds.length ? '\n\nShrinking audio reads the original videos once; keep the drive connected until it finishes.' : ''}`;
-      if (!window.confirm(msg)) return;
+      const foot = $('.free-foot', panel);
+      foot.classList.add('confirming');
+      foot.innerHTML = `<span class="hint">Free about ${bytes(t)} across ${chosen.length} case${chosen.length === 1 ? '' : 's'}? Your original videos, transcripts, names and edits are not touched.${shrinkIds.length ? ' Shrinking reads the originals once, so keep the drive connected.' : ''}</span><span class="grow"></span><button class="btn small ghost" id="free-back">Back</button><button class="btn small primary" id="free-yes">Yes, free up</button>`;
+      $('#free-back').onclick = () => renderFreePanel();
+      $('#free-yes').onclick = () => run(chosen, shrinkIds);
+      $('#free-back').focus();
+    };
+    const run = async (chosen, shrinkIds) => {
       let freedNow = 0;
       for (const r of chosen) { const s = S.freeSel[r.id]; const p = parts(r); if (p.proxies || p.audio) { await bcs.invoke('cache:clear', r.id, { proxies: !!p.proxies, audio: !!p.audio }); freedNow += p.proxies + p.audio; } }
       S.freedNow = freedNow;
