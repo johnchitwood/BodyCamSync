@@ -37,6 +37,11 @@ Click a camera to switch the view and the sound; grid and single-view layouts; f
   these pairs with the evidence (lines heard together), flags voices that look like a mix of people, and applies a
   match only when you confirm it. Nothing is merged automatically; matches undo as one step.
 - ⌘-click / Shift-click lines to select several, then reassign or delete them together.
+- Live captions (Playback tab, the CC button, or C): the line being spoken is shown over the picture with who said it,
+  for the audible camera or every camera. Captions are an on-screen layer only; nothing is burned into a video or written
+  to any file. They follow the transcript as edited, each camera shows only what its own microphone heard, and timing is
+  per transcript line (about a second). A name appears only after a reviewer assigns the voice to a person; machine-grouped
+  voices show as "Speaker N" marked UNCONFIRMED.
 - Export (`.txt`) lists speakers and ends with the original machine text of every edited line.
 - Models and caches: `~/Library/Application Support/BodyCamSync/models/` and `.../projects/<id>/`.
 
@@ -63,7 +68,7 @@ Click a camera to switch the view and the sound; grid and single-view layouts; f
 
 ## Keys
 
-Space play/pause · ← → one frame · ⇧← ⇧→ one second · J / L ten seconds · 1-9 switch camera · Tab next · G grid/single
+Space play/pause · ← → one frame · ⇧← ⇧→ one second · J / L ten seconds · 1-9 switch camera · Tab next · G grid/single · C captions
 
 ## Layout
 

@@ -3,6 +3,7 @@
   const { Engine, Timeline, icons: I, fmtTime, FRAME } = window.BCS;
   const bcs = window.bcs;
   const TX = () => window.BCS.transcript;
+  const CC = () => window.BCS.captions;
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -335,7 +336,7 @@
 
   const savePrefs = debounce(() => {
     if (!S.project) return;
-    const prefs = { visible: {}, angle: {}, track: {}, mode: S.mode, active: S.engine.activeId, proxies: S.useProxies, autoProxies: S.autoProxies };
+    const prefs = { visible: {}, angle: {}, track: {}, mode: S.mode, active: S.engine.activeId, proxies: S.useProxies, autoProxies: S.autoProxies, captions: S.captions, capSpeakers: S.capSpeakers, capSize: S.capSize };
     for (const c of S.cams) { prefs.visible[c.id] = c.visible !== false; prefs.angle[c.id] = c.angle; if (c.track) prefs.track[c.id] = c.track.index; }
     S.project.prefs = prefs;
     bcs.invoke('project:setPrefs', S.project.id, prefs);
@@ -348,6 +349,10 @@
     S.mode = prefs.mode || 'grid';
     S.useProxies = prefs.proxies !== false;
     S.autoProxies = prefs.autoProxies !== false;
+    // Captions are off unless the reviewer turned them on for this case.
+    S.captions = ['off', 'active', 'all'].includes(prefs.captions) ? prefs.captions : 'off';
+    S.capSpeakers = prefs.capSpeakers !== false;
+    S.capSize = ['s', 'm', 'l'].includes(prefs.capSize) ? prefs.capSize : 'm';
     S.proxy = {};
     S.engine.useProxies = S.useProxies;
     S.engine.load(S.cams);
@@ -368,7 +373,8 @@
     updateTags();
     S.engine.on('source', updateTags);
     TX().reset();
-    TX().load().then(() => { if (S.tab === 'transcript') renderPanel(); });
+    CC().reset();
+    TX().load().then(() => { if (S.tab === 'transcript' || S.tab === 'playback') renderPanel(); CC().refresh(); updateTransport(); });
     if (!S._trWired) { S._trWired = true; S.engine.on('time', throttle(() => TX().markNow(false), 250)); }
     // Make local copies in the background (they make seeking instant), and measure seek speed meanwhile.
     if (S.autoProxies) setTimeout(() => { if (S.project === project) maybeAutoProxies(); }, 2500);
@@ -431,7 +437,21 @@
     $$('#mode-seg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === S.mode));
   }
 
-  function setMode(m) { S.mode = m; layoutStage(); savePrefs(); }
+  function setMode(m) { S.mode = m; layoutStage(); savePrefs(); CC().update(); }
+
+  // ---- captions ----------------------------------------------------------
+  // Remembers the last "on" choice so the button and the C key restore it.
+  function setCaptions(mode) {
+    S.captions = mode;
+    if (mode !== 'off') S._capLast = mode;
+    updateTransport(); savePrefs(); CC().refresh();
+    if (S.tab === 'playback') renderPanel();
+  }
+  function toggleCaptions() {
+    if (S.captions && S.captions !== 'off') { setCaptions('off'); return; }
+    setCaptions(S._capLast || 'active');
+    if (!CC().hasTranscript()) toast('Captions come from the transcript. This case has none yet: make one in the Transcript tab.', 7000);
+  }
 
   function selectCam(id) {
     const c = S.cams.find((x) => x.id === id);
@@ -465,6 +485,14 @@
     $$('#mode-seg button').forEach((b) => { b.innerHTML = b.dataset.mode === 'grid' ? I.grid(15) : I.focus(15); b.classList.toggle('on', b.dataset.mode === S.mode); });
     const v = S.engine.volume;
     $('#vol-icon').innerHTML = v === 0 ? I.mute(16) : v < 0.5 ? I.speakerLow(16) : I.speaker(16);
+    const cc = $('#btn-cc');
+    if (cc) {
+      cc.innerHTML = I.captions(16);
+      const on = S.captions && S.captions !== 'off';
+      cc.classList.toggle('on', !!on);
+      cc.setAttribute('aria-pressed', on ? 'true' : 'false');
+      cc.title = (on ? 'Hide captions' : 'Show captions') + '  C';
+    }
   }
 
   let lastText = '';
@@ -491,10 +519,12 @@
     $('#speed').onchange = (e) => S.engine.setRate(parseFloat(e.target.value));
     $('#vol').oninput = (e) => { S.engine.setVolume(parseFloat(e.target.value)); updateTransport(); };
     $$('#mode-seg button').forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
+    $('#btn-cc').onclick = toggleCaptions;
     S.engine.on('time', onTime);
+    S.engine.on('time', throttle(() => CC().update(), 90));
     S.engine.on('state', updateTransport);
-    S.engine.on('active', () => { layoutStage(); renderPanel(); });
-    S.engine.on('coverage', onTime);
+    S.engine.on('active', () => { layoutStage(); renderPanel(); CC().update(); });
+    S.engine.on('coverage', () => { onTime(); CC().update(); });
 
     document.addEventListener('keydown', (e) => {
       if ($('#app').dataset.view !== 'workspace') return;
@@ -513,6 +543,7 @@
       else if (k === 'l' || k === 'L') S.engine.seek(S.engine.T + 10, { precise: true });
       else if (k === 'Home') S.engine.seek(0, { precise: true });
       else if (k === 'g' || k === 'G') setMode(S.mode === 'grid' ? 'focus' : 'grid');
+      else if (!meta && (k === 'c' || k === 'C')) toggleCaptions();
       else if (k === 'Tab') { e.preventDefault(); const vis = S.cams.filter((c) => c.visible); const i = vis.findIndex((c) => c.id === S.engine.activeId); selectCam(vis[(i + (e.shiftKey ? -1 : 1) + vis.length) % vis.length].id); }
       else if (!meta && /^[1-9]$/.test(k)) { const c = S.cams[parseInt(k, 10) - 1]; if (c) selectCam(c.id); }
     });
@@ -667,7 +698,14 @@
     const proxyKeys = S.cams.map((c) => `${c.id}_${c.angle}`);
     const built = S.cams.filter((c) => c.file.proxyUrl).length;
     const running = Object.values(S.proxy).some((x) => x.state === 'running' || x.state === 'queued');
-    let h = `<div class="section-label group-title">Seeking speed</div><div class="card">`;
+    const hasSpk = !!(S.tr && Object.keys(S.tr.spk || {}).length);
+    let h = `<div class="section-label group-title">Captions</div><div class="card">
+      <p>Shows the transcript line being spoken over the picture, with who is speaking. Captions are drawn on screen only. Nothing is added to the video or to any file.</p>
+      <div class="row"><span>Show captions</span><span class="mini-seg" id="cc-mode">${[['off', 'Off'], ['active', 'Audible camera'], ['all', 'Every camera']].map(([v, t]) => `<button data-v="${v}" class="${(S.captions || 'off') === v ? 'on' : ''}">${t}</button>`).join('')}</span></div>
+      <div class="row"><span>Show who is speaking</span><button class="toggle ${S.capSpeakers ? 'on' : ''}" id="cc-spk" aria-label="Show who is speaking"></button></div>
+      <div class="row"><span>Text size</span><span class="mini-seg" id="cc-size">${[['s', 'Small'], ['m', 'Medium'], ['l', 'Large']].map(([v, t]) => `<button data-v="${v}" class="${(S.capSize || 'm') === v ? 'on' : ''}">${t}</button>`).join('')}</span></div>
+      <div class="hint" style="margin-top:6px">${CC().hasTranscript() ? '' : 'This case has no transcript yet. Make one in the Transcript tab and captions will appear. '}Each camera shows what its own microphone picked up, including your corrections from the Transcript tab. Timing is good to about a second. ${hasSpk || !S.capSpeakers ? '' : 'Speakers have not been detected for this case yet (Transcript tab), so no names are shown. '}A name appears only after you assign a voice to a person. Voices the computer grouped on its own show as “Speaker N” marked <b>unconfirmed</b>: a guess from the sound of the voice, not an identification. Faded words are low-confidence. Always check against the audio. Press C to turn captions on or off.</div></div>`;
+    h += `<div class="section-label group-title">Seeking speed</div><div class="card">`;
     h += `<p>Measures how quickly each camera jumps to a new moment. Slow seeking usually means the source drive is slow.</p>`;
     if (S.bench) {
       for (const r of S.bench) {
@@ -696,6 +734,9 @@
     h += built ? `<button class="btn small ghost" id="proxy-clear">Remove copies</button>` : '<span></span>';
     h += `</div><div class="hint" style="margin-top:8px">Using ${bytes(S.project.cacheBytes || 0)} of cache on this computer.</div></div>`;
     p.innerHTML = h;
+    $$('#cc-mode button').forEach((b) => { b.onclick = () => setCaptions(b.dataset.v); });
+    $('#cc-spk').onclick = () => { S.capSpeakers = !S.capSpeakers; savePrefs(); CC().refresh(); renderPanel(); };
+    $$('#cc-size button').forEach((b) => { b.onclick = () => { S.capSize = b.dataset.v; savePrefs(); CC().refresh(); renderPanel(); }; });
     const bench = $('#bench'); if (bench) bench.onclick = runBenchmark;
     $('#proxy-toggle').onclick = () => { S.useProxies = !S.useProxies; S.engine.setProxyMode(S.useProxies); savePrefs(); renderPanel(); };
     $('#proxy-auto').onclick = () => { S.autoProxies = !S.autoProxies; savePrefs(); renderPanel(); };
