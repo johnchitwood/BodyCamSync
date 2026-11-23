@@ -22,6 +22,10 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+const IS_MAC = process.platform === 'darwin';
+const PAPER = { color: '#f6f7f5', symbol: '#17212c', height: 44 };
+const NAVY = { color: '#1f2d3d', symbol: '#eef1f4', height: 44 };
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1520,
@@ -30,15 +34,17 @@ function createWindow() {
     minHeight: 680,
     show: false,
     backgroundColor: '#0d0e10',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 18, y: 17 },
+    ...(IS_MAC
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 17 } }
+      // Windows/Linux: our own title bar, with the system window buttons drawn over its right end
+      : { titleBarStyle: 'hidden', titleBarOverlay: { color: PAPER.color, symbolColor: PAPER.symbol, height: 44 }, autoHideMenuBar: true }),
     title: 'BodyCamSync',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
-      additionalArguments: [`--bcs-debug=${DEBUG ? 1 : 0}`, `--bcs-autotest=${process.env.BCS_AUTOTEST || ''}`],
+      additionalArguments: [`--bcs-platform=${process.platform}`, `--bcs-debug=${DEBUG ? 1 : 0}`, `--bcs-autotest=${process.env.BCS_AUTOTEST || ''}`],
     },
   });
   win.once('ready-to-show', () => win.show());
@@ -54,15 +60,15 @@ function createWindow() {
 
 function buildMenu() {
   const template = [
-    { label: 'BodyCamSync', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] },
+    ...(IS_MAC ? [{ label: 'BodyCamSync', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
     { label: 'File', submenu: [
       { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => send('menu:open') },
       { label: 'Open Files…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('menu:openFiles') },
-      { type: 'separator' }, { role: 'close' },
+      { type: 'separator' }, IS_MAC ? { role: 'close' } : { role: 'quit', label: 'Exit' },
     ] },
     { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'togglefullscreen' }, { type: 'separator' }, { role: 'toggleDevTools' }] },
-    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
+    { label: 'Window', submenu: [{ role: 'minimize' }, ...(IS_MAC ? [{ role: 'zoom' }] : [])] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -117,7 +123,7 @@ ipcMain.handle('project:open', async (_e, target, opts = {}) => {
   }
 });
 
-// Remove files the app made on this Mac. Never touches originals, transcripts, speaker data or edits.
+// Remove files the app made on this computer. Never touches originals, transcripts, speaker data or edits.
 ipcMain.handle('cache:clear', (_e, id, kinds = {}) => {
   if (!/^[a-f0-9]{8,16}$/.test(String(id))) return false;
   const d = store.dir(id);
@@ -159,6 +165,11 @@ ipcMain.handle('transcript:export', async (_e, suggested, text) => {
   if (r.canceled || !r.filePath) return null;
   fs.writeFileSync(r.filePath, text, 'utf8');
   return r.filePath;
+});
+// Windows/Linux: recolour the system window buttons to sit on the paper or navy title bar.
+ipcMain.handle('ui:chrome', (_e, dark) => {
+  if (!IS_MAC && win && win.setTitleBarOverlay) { try { win.setTitleBarOverlay(dark ? NAVY : PAPER); } catch (_) { /* not supported */ } }
+  return true;
 });
 ipcMain.handle('shell:reveal', (_e, p) => { shell.showItemInFolder(p); return true; });
 

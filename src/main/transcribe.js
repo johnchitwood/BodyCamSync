@@ -1,5 +1,5 @@
 'use strict';
-// Local speech-to-text via whisper.cpp. Nothing leaves this Mac.
+// Local speech-to-text via whisper.cpp. Nothing leaves this computer.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -15,12 +15,13 @@ const CACHE_VERSION = 3;
 function modelsDir() { const d = path.join(store.baseDir(), 'models'); fs.mkdirSync(d, { recursive: true }); return d; }
 
 function findEngine() {
+  const exe = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
+  const plat = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux';
   const cands = [
     process.env.BCS_WHISPER,
-    process.resourcesPath && path.join(process.resourcesPath, 'bin', 'whisper-cli'),
-    path.join(__dirname, '..', '..', 'resources', 'bin', 'whisper-cli'),
-    '/opt/homebrew/bin/whisper-cli',
-    '/usr/local/bin/whisper-cli',
+    process.resourcesPath && path.join(process.resourcesPath, 'bin', exe),
+    path.join(__dirname, '..', '..', 'resources', plat, exe),
+    ...(process.platform === 'darwin' ? ['/opt/homebrew/bin/whisper-cli', '/usr/local/bin/whisper-cli'] : []),
   ].filter(Boolean);
   return cands.find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } }) || null;
 }

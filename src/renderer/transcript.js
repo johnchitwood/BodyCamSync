@@ -386,7 +386,7 @@
     TR._batch = null;
     TR.sel.clear(); TR.lastSelIdx = null;
     persist(); afterChange(); refreshSel();
-    C().toast(`${kind} ${lines.length} line${lines.length === 1 ? '' : 's'} · ⌘Z to undo`);
+    C().toast(`${kind} ${lines.length} line${lines.length === 1 ? '' : 's'} · ${window.BCS_KEYS.mod}Z to undo`);
   }
   function bulkAssign(personId) {
     bulk('Reassigned', (l) => mutate(l, 'speaker', displayName(l.person), personId === undefined ? '(detected voice)' : displayName(personId === null ? null : personById(personId)), (t) => { t.person = personId; }, true));
@@ -670,10 +670,10 @@
     const expected = TR.data.expected || 0, have = (TR.data.tracks || []).length;
     let h = '';
     if (!st.engine) {
-      h = `<div class="card"><h4>Transcription isn’t set up yet</h4><p class="hint">The local speech engine isn’t installed on this Mac. Nothing is sent anywhere — recognition runs entirely on this computer once it is.</p></div>`;
+      h = `<div class="card"><h4>Transcription isn’t set up yet</h4><p class="hint">The local speech engine isn’t installed on this computer. Nothing is sent anywhere — recognition runs entirely on this computer once it is.</p></div>`;
     } else if (!st.model) {
       const m = TR.model;
-      h = `<div class="card"><h4>Download the speech model</h4><p class="hint">One-time download (about ${st.modelSizeMB} MB). After that, transcription works offline and nothing leaves this Mac.</p>
+      h = `<div class="card"><h4>Download the speech model</h4><p class="hint">One-time download (about ${st.modelSizeMB} MB). After that, transcription works offline and nothing leaves this computer.</p>
         ${m && m.state === 'downloading' ? `<div class="progress"><div style="width:${Math.round(m.pct * 100)}%"></div></div><div class="hint" style="margin-top:8px">${Math.round(m.pct * 100)}%</div>` : `<button class="btn small primary" id="tr-dl">Download model</button>`}
         ${m && m.state === 'error' ? `<p class="hint" style="color:var(--bad);margin-top:8px">${esc(m.error)}</p>` : ''}</div>`;
     } else if (TR.running) {
@@ -684,7 +684,7 @@
         <p class="hint" style="margin:8px 0 0">You can keep watching. Finished cameras appear below as they complete.</p></div>`;
     } else if (have < expected) {
       const mins = TR.data.audioMinutes || 0;
-      h = `<div class="card"><h4>${have ? 'Finish the transcript' : 'Create a transcript'}</h4><p class="hint">Turns what each camera heard into searchable text on the shared timeline, and works out who is speaking. About ${mins} minutes of audio; usually ${Math.max(2, Math.round(mins / 40))}–${Math.max(5, Math.round(mins / 14))} minutes on this Mac. Runs locally.</p>
+      h = `<div class="card"><h4>${have ? 'Finish the transcript' : 'Create a transcript'}</h4><p class="hint">Turns what each camera heard into searchable text on the shared timeline, and works out who is speaking. About ${mins} minutes of audio; ${(() => { const mac = bcs.platform === 'darwin'; const lo = Math.max(2, Math.round(mins / (mac ? 40 : 6))), hi = Math.max(5, Math.round(mins / (mac ? 14 : 2))); return mac ? `usually ${lo}–${hi} minutes on this computer` : `roughly ${lo}–${hi} minutes, depending on your processor (a rough guess for this computer, not measured)`; })()}. Runs locally.</p>
         <button class="btn small primary" id="tr-go">${have ? 'Continue' : 'Generate transcript'}</button>${TR.error ? `<p class="hint" style="color:var(--bad);margin:8px 0 0">${esc(TR.error)}</p>` : ''}</div>`;
     }
     // speaker detection card
@@ -761,7 +761,7 @@
   function panel(p) {
     const S = C().S;
     S.tr = TR;
-    p.innerHTML = `<div class="tr-head"><div class="section-label">Transcript</div><div class="tr-tools"><label class="follow"><button class="toggle ${TR.follow ? 'on' : ''}" id="tr-follow" aria-label="Follow playback"></button><span>Follow</span></label><button class="btn small ghost" id="tr-undo" title="Undo the last edit (⌘Z)">Undo</button><button class="btn small ghost" id="tr-export" ${TR.lines.length ? '' : 'disabled'}>Export…</button></div></div>
+    p.innerHTML = `<div class="tr-head"><div class="section-label">Transcript</div><div class="tr-tools"><label class="follow"><button class="toggle ${TR.follow ? 'on' : ''}" id="tr-follow" aria-label="Follow playback"></button><span>Follow</span></label><button class="btn small ghost" id="tr-undo" title="Undo the last edit (${window.BCS_KEYS.mod}Z)">Undo</button><button class="btn small ghost" id="tr-export" ${TR.lines.length ? '' : 'disabled'}>Export…</button></div></div>
       <div id="tr-status"></div>
       <div class="tr-controls" ${TR.lines.length ? '' : 'hidden'}>
         <input id="tr-q" class="search" type="search" placeholder="Search words or speakers" value="${esc(TR.q)}" spellcheck="false">
@@ -774,7 +774,7 @@
       <div id="tr-selbar" class="selbar" hidden><span id="tr-selcount"></span><span class="grow"></span><button class="btn small" id="sel-assign">Assign speaker…</button><button class="btn small ghost" id="sel-delete">Delete</button><button class="btn small ghost" id="sel-clear">Clear</button></div>
       ${TR.lines.length ? `<div class="tr-foot"><div class="row"><label class="follow"><button class="toggle ${TR.showDeleted ? 'on' : ''}" id="tr-deleted" aria-label="Show deleted lines"></button><span>Show deleted lines</span></label><button class="linkbtn" id="tr-hist">Edit history</button></div>
         <div id="tr-history" class="history" hidden></div>
-        <div class="hint" style="margin-top:10px">Machine-generated and imperfect, especially in noise. Faded words are low-confidence. Double-click any line to correct it. ⌘-click or Shift-click lines to select several, then reassign them together. Your corrections are kept separately and the original text is never overwritten. Always check against the audio.</div></div>` : ''}`;
+        <div class="hint" style="margin-top:10px">Machine-generated and imperfect, especially in noise. Faded words are low-confidence. Double-click any line to correct it. ${window.BCS_KEYS.mod === '⌘' ? '⌘' : 'Ctrl'}-click or Shift-click lines to select several, then reassign them together. Your corrections are kept separately and the original text is never overwritten. Always check against the audio.</div></div>` : ''}`;
     fillStatus(); fillList(); fillPeople(); refreshSel();
     $('#sel-assign').onclick = (e) => openMenu(null, e.currentTarget, true);
     $('#sel-delete').onclick = bulkDelete;

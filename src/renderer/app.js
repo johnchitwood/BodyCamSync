@@ -57,7 +57,19 @@
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const throttle = (fn, ms) => { let t = 0, pend = false; return (...a) => { if (t) { pend = true; return; } fn(...a); t = setTimeout(() => { t = 0; if (pend) { pend = false; fn(...a); } }, ms); }; };
 
-  function setView(v) { $('#app').dataset.view = v; renderTitlebar(); }
+  // A long folder path reduced to its last few parts, written with the system's own separator.
+  const shortPath = (p) => {
+    const sep = p.includes('\\') && !p.includes('/') ? '\\' : '/';
+    const parts = String(p).split(/[\\/]/).filter(Boolean);
+    return parts.length > 4 ? '…' + sep + parts.slice(-3).join(sep) : p;
+  };
+  const IS_MAC = bcs.platform === 'darwin';
+  document.documentElement.dataset.platform = bcs.platform;
+  window.BCS_KEYS = { mod: IS_MAC ? '⌘' : 'Ctrl+', shift: IS_MAC ? '⇧' : 'Shift' };
+  function setView(v) {
+    $('#app').dataset.view = v; renderTitlebar();
+    if (!IS_MAC) bcs.invoke('ui:chrome', v === 'workspace');
+  }
 
   function renderTitlebar() {
     const v = $('#app').dataset.view;
@@ -87,7 +99,7 @@
     const pct = Math.round((list.reduce((a, p) => a + (p.state === 'done' ? 1 : p.pct || 0), 0) / S.cams.length) * 100);
     el.hidden = false;
     el.innerHTML = `<span class="spin"></span>Preparing local copies · ${pct}%`;
-    el.title = 'Smaller copies are being made on this Mac so seeking is instant. Your originals are not changed.';
+    el.title = 'Smaller copies are being made on this computer so seeking is instant. Your originals are not changed.';
   }
 
   function updateTags() {
@@ -104,7 +116,7 @@
       const row = document.createElement('div'); row.className = 'recent-row';
       const b = document.createElement('button');
       b.className = 'recent'; b.disabled = !r.exists;
-      b.innerHTML = `<span style="color:var(--text-3)">${I.folder(18)}</span><span class="r-main"><div class="r-name">${esc(r.name)}</div><div class="r-path">${esc(r.folder)}</div></span><span class="r-meta">${r.cameras} camera${r.cameras === 1 ? '' : 's'} · ${bytes(r.cacheBytes || 0)} on this Mac</span>`;
+      b.innerHTML = `<span style="color:var(--text-3)">${I.folder(18)}</span><span class="r-main"><div class="r-name">${esc(r.name)}</div><div class="r-path" title="${esc(r.folder)}">${esc(shortPath(r.folder))}</div></span><span class="r-meta">${r.cameras} camera${r.cameras === 1 ? '' : 's'} · ${bytes(r.cacheBytes || 0)} on this computer</span>`;
       b.onclick = () => openFolder(r.selection || r.folder);
       row.append(b);
       if ((r.proxyBytes || 0) > 2e8) {
@@ -128,7 +140,7 @@
     const { free } = await bcs.invoke('disk:free');
     const note = document.createElement('div');
     note.className = 'hint'; note.style.margin = '12px 0 0';
-    note.textContent = `Caches for these cases use ${bytes(total)} on this Mac. ${bytes(free)} free.`;
+    note.textContent = `Caches for these cases use ${bytes(total)} on this computer. ${bytes(free)} free.`;
     el.append(note);
     S.recentList = list; S.freeDisk = free;
     const reclaim = list.reduce((a, r) => a + (r.proxyBytes || 0) + (r.shrinkBytes || 0), 0);
@@ -138,7 +150,7 @@
   }
 
   // ---- "Free up space": choose what to remove, across all cases ----
-  // Only files the app made on this Mac are ever removed. Originals, transcripts, speaker names and edits are untouched.
+  // Only files the app made on this computer are ever removed. Originals, transcripts, speaker names and edits are untouched.
   function renderFreePanel() {
     const panel = $('#free-panel'); if (!panel) return;
     if (!S.freeOpen) { panel.hidden = true; panel.innerHTML = ''; return; }
@@ -160,7 +172,7 @@
     S.freeSel = S.freeSel || {};
     for (const r of list) if (!S.freeSel[r.id]) S.freeSel[r.id] = { shrink: (r.shrinkBytes || 0) > 1e8, proxies: (r.proxyBytes || 0) > 2e8, audio: false };
     let h = `<div class="card free"><h4>Free up space</h4>
-      <p class="hint">These are files the app made on this Mac so cases open and play quickly. Your original videos, transcripts, speaker names and edits are never removed.</p>`;
+      <p class="hint">These are files the app made on this computer so cases open and play quickly. Your original videos, transcripts, speaker names and edits are never removed.</p>`;
     for (const r of list) {
       const s = S.freeSel[r.id];
       h += `<div class="free-case"><div class="free-name">${esc(r.name)}</div>
@@ -261,7 +273,7 @@
 
   async function openFolder(folder, opts = {}) {
     if (S.compacting) { toast('Audio copies are being shrunk. Let it finish, or stop it first.', 5000); return; }
-    $('#proc-name').textContent = Array.isArray(folder) ? `${folder.length} selected files` : folder.split('/').filter(Boolean).slice(-2).join(' / ');
+    $('#proc-name').textContent = Array.isArray(folder) ? `${folder.length} selected files` : folder.split(/[\\/]/).filter(Boolean).slice(-2).join(' / ');
     $('#proc-error').hidden = true; $('#proc-back').hidden = true;
     $$('.step').forEach((el) => { el.classList.remove('active', 'done'); $('.step-detail', el).textContent = ''; });
     $('#proc-bar').style.width = '0%';
@@ -377,7 +389,7 @@
       empty.innerHTML = `<b>No footage at this moment</b><span class="mono t-empty"></span>`;
       view.append(empty);
       const cap = document.createElement('div'); cap.className = 'tile-cap';
-      cap.innerHTML = `<span class="cap-l">${ctab(c)}<span class="t-label">${esc(c.shortLabel)}</span><span class="tag t-tag" hidden title="This picture is a smaller copy kept on this Mac. The original file is unchanged."></span></span><span class="cap-r"><span class="mono t-time"></span><span class="spk">${I.speaker(13)}</span></span>`;
+      cap.innerHTML = `<span class="cap-l">${ctab(c)}<span class="t-label">${esc(c.shortLabel)}</span><span class="tag t-tag" hidden title="This picture is a smaller copy kept on this computer. The original file is unchanged."></span></span><span class="cap-r"><span class="mono t-time"></span><span class="spk">${I.speaker(13)}</span></span>`;
       t.append(view, cap);
       t.addEventListener('click', () => selectCam(c.id));
       t.addEventListener('dblclick', () => { selectCam(c.id); setMode(S.mode === 'grid' ? 'focus' : 'grid'); });
@@ -548,7 +560,7 @@
     h += `<div class="section-label group-title">Shortcuts</div><div class="keys">
       <span class="kbd">Space</span><span>Play / pause</span>
       <span class="kbd">← →</span><span>One frame back / forward</span>
-      <span class="kbd">⇧ ← →</span><span>One second</span>
+      <span class="kbd">${window.BCS_KEYS.shift} ← →</span><span>One second</span>
       <span class="kbd">J  L</span><span>Ten seconds back / forward</span>
       <span class="kbd">1 – 9</span><span>Switch camera and sound</span>
       <span class="kbd">Tab</span><span>Next camera</span>
@@ -667,8 +679,8 @@
     h += `<div class="row" style="margin-top:10px"><span class="hint">${S.bench ? 'Median of several random jumps.' : 'Not measured yet.'}</span><button class="btn small" id="bench">${S.benchRunning ? 'Measuring…' : S.bench ? 'Test again' : 'Test seeking'}</button></div></div>`;
 
     h += `<div class="section-label group-title">Local copies</div><div class="card">
-      <p>Smaller copies kept on this Mac make seeking and scrubbing instant, even if the evidence drive is slow. Your original files are never changed and stay the source of truth.</p>
-      ${S.proxyPlan && S.proxyPlan.blocked && built < S.cams.filter((c) => c.visible).length ? `<p class="hint" style="color:var(--warn)">Not built automatically: copies for ${S.proxyPlan.n} cameras would use about ${bytes(S.proxyPlan.est)}, and this Mac has ${bytes(S.proxyPlan.free)} free. Hide cameras you don’t need (Cameras tab) and build only for the rest.</p>` : ''}
+      <p>Smaller copies kept on this computer make seeking and scrubbing instant, even if the evidence drive is slow. Your original files are never changed and stay the source of truth.</p>
+      ${S.proxyPlan && S.proxyPlan.blocked && built < S.cams.filter((c) => c.visible).length ? `<p class="hint" style="color:var(--warn)">Not built automatically: copies for ${S.proxyPlan.n} cameras would use about ${bytes(S.proxyPlan.est)}, and this computer has ${bytes(S.proxyPlan.free)} free. Hide cameras you don’t need (Cameras tab) and build only for the rest.</p>` : ''}
       <div class="row"><span>Use local copies when available</span><button class="toggle ${S.useProxies ? 'on' : ''}" id="proxy-toggle" aria-label="Use local copies"></button></div>
       <div class="row"><span>Prepare them automatically</span><button class="toggle ${S.autoProxies ? 'on' : ''}" id="proxy-auto" aria-label="Prepare local copies automatically"></button></div>
       <div class="hint" style="margin:6px 0 8px">Local copies are 720p. Turn them off to view the full-resolution originals.</div>`;
@@ -682,7 +694,7 @@
     const allBuilt = built === S.cams.length;
     h += running ? `<button class="btn small" id="proxy-cancel">Cancel</button>` : allBuilt ? '<span class="hint">All cameras have local copies.</span>' : `<button class="btn small primary" id="proxy-build">${built ? 'Build missing copies' : 'Build local copies'}</button>`;
     h += built ? `<button class="btn small ghost" id="proxy-clear">Remove copies</button>` : '<span></span>';
-    h += `</div><div class="hint" style="margin-top:8px">Using ${bytes(S.project.cacheBytes || 0)} of cache on this Mac.</div></div>`;
+    h += `</div><div class="hint" style="margin-top:8px">Using ${bytes(S.project.cacheBytes || 0)} of cache on this computer.</div></div>`;
     p.innerHTML = h;
     const bench = $('#bench'); if (bench) bench.onclick = runBenchmark;
     $('#proxy-toggle').onclick = () => { S.useProxies = !S.useProxies; S.engine.setProxyMode(S.useProxies); savePrefs(); renderPanel(); };

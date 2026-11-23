@@ -41,12 +41,24 @@ async function buildProxy(projectId, groupId, angle, emit) {
     if (free - need < DISK_RESERVE) throw new Error(`Not enough free disk space for local copies (${(free / 1e9).toFixed(0)} GB free; keeping ${(DISK_RESERVE / 1e9).toFixed(0)} GB in reserve).`);
     const enc = await media.proxyEncoder();
     const scale = f.height > 720 ? 'scale=1280:-2:flags=bicubic' : 'scale=iw:ih';
-    const codecArgs = enc.codec === 'h264_videotoolbox'
-      ? ['-c:v', 'h264_videotoolbox', '-b:v', '5M', '-maxrate', '8M', '-g', '15', '-bf', '0', '-profile:v', 'high']
+    // Short keyframe interval (-g 15) and no B-frames keep seeking instant. Hardware encoders are rate-controlled.
+    const hw = (name, extra = []) => ['-c:v', name, '-b:v', '5M', '-maxrate', '8M', '-g', '15', '-bf', '0', ...extra];
+    const codecArgsFor = (codec) => codec === 'h264_videotoolbox' ? hw(codec, ['-profile:v', 'high'])
+      : codec === 'h264_nvenc' ? hw(codec, ['-profile:v', 'high', '-preset', 'p4'])
+      : codec === 'h264_qsv' ? hw(codec, ['-profile:v', 'high'])
+      : codec === 'h264_amf' ? hw(codec, ['-usage', 'transcoding'])
       : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-g', '15', '-bf', '0'];
-    const args = ['-i', f.path, '-map', '0:v:0', '-an', '-vf', scale, ...codecArgs, '-pix_fmt', 'yuv420p', '-fps_mode', 'cfr', '-r', '30', '-movflags', '+faststart', '-f', 'mp4', tmp];
+    const argsFor = (codec) => ['-i', f.path, '-map', '0:v:0', '-an', '-vf', scale, ...codecArgsFor(codec), '-pix_fmt', 'yuv420p', '-fps_mode', 'cfr', '-r', '30', '-movflags', '+faststart', '-f', 'mp4', tmp];
     emit({ groupId, angle, state: 'running', pct: 0 });
-    await media.runFfmpeg(enc.bin, args, { duration: f.duration, signal: ac.signal, onProgress: (p) => emit({ groupId, angle, state: 'running', pct: p }) });
+    const opts = { duration: f.duration, signal: ac.signal, onProgress: (p) => emit({ groupId, angle, state: 'running', pct: p }) };
+    try {
+      await media.runFfmpeg(enc.bin, argsFor(enc.codec), opts);
+    } catch (e) {
+      // a hardware encoder can pass the quick test and still fail on a real file: fall back to software once
+      if (enc.codec === 'libx264' || ac.signal.aborted) throw e;
+      fs.rmSync(tmp, { force: true });
+      await media.runFfmpeg(media.FFMPEG, argsFor('libx264'), opts);
+    }
     fs.renameSync(tmp, out);
     emit({ groupId, angle, state: 'done', pct: 1 });
   } catch (e) {

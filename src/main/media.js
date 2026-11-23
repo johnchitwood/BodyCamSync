@@ -14,30 +14,38 @@ function findBin(name) {
     const p = unpacked(name === 'ffmpeg' ? require('ffmpeg-static') : require('ffprobe-static').path);
     if (p && fs.existsSync(p)) return p;
   } catch (_) { /* fall through */ }
-  for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']) {
+  const dirs = process.platform === 'win32' ? [] : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
+  for (const dir of dirs) {
     const p = path.join(dir, name);
     if (fs.existsSync(p)) return p;
   }
-  return name;
+  return name; // fall back to PATH
 }
 const FFMPEG = findBin('ffmpeg');
 const FFPROBE = findBin('ffprobe');
 
 let encoderCache = null;
-function proxyEncoder() {
-  if (encoderCache) return Promise.resolve(encoderCache);
+// Hardware H.264 encoders worth trying, best first. Listing an encoder is not enough (a PC without the
+// matching GPU still lists it), so each one is test-encoded for a fraction of a second before it is chosen.
+const HW_ENCODERS = process.platform === 'darwin' ? ['h264_videotoolbox']
+  : process.platform === 'win32' ? ['h264_nvenc', 'h264_qsv', 'h264_amf'] : [];
+function testEncoder(bin, codec) {
   return new Promise((resolve) => {
-    // Prefer Apple hardware encoding wherever ffmpeg offers it.
-    const tryBins = [FFMPEG, '/opt/homebrew/bin/ffmpeg'].filter((p) => p && fs.existsSync(p));
-    const next = (i) => {
-      if (i >= tryBins.length) { encoderCache = { bin: FFMPEG, codec: 'libx264' }; return resolve(encoderCache); }
-      execFile(tryBins[i], ['-hide_banner', '-encoders'], { maxBuffer: 1 << 24 }, (err, out) => {
-        if (!err && /h264_videotoolbox/.test(out)) { encoderCache = { bin: tryBins[i], codec: 'h264_videotoolbox' }; return resolve(encoderCache); }
-        next(i + 1);
-      });
-    };
-    next(0);
+    execFile(bin, ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=1280x720:r=30:d=0.4', '-frames:v', '6', '-c:v', codec, '-pix_fmt', 'yuv420p', '-f', 'null', '-'],
+      { timeout: 15000 }, (err) => resolve(!err));
   });
+}
+async function proxyEncoder() {
+  if (encoderCache) return encoderCache;
+  const bins = [FFMPEG];
+  if (process.platform === 'darwin' && fs.existsSync('/opt/homebrew/bin/ffmpeg')) bins.push('/opt/homebrew/bin/ffmpeg');
+  for (const bin of bins) {
+    for (const codec of HW_ENCODERS) {
+      if (await testEncoder(bin, codec)) { encoderCache = { bin, codec }; return encoderCache; }
+    }
+  }
+  encoderCache = { bin: FFMPEG, codec: 'libx264' };
+  return encoderCache;
 }
 
 // ---------- probing ----------
@@ -131,7 +139,9 @@ function commonDir(paths) {
   const parts = paths.map((p) => path.dirname(path.resolve(p)).split(path.sep));
   let n = Math.min(...parts.map((x) => x.length)), i = 0;
   while (i < n && parts.every((x) => x[i] === parts[0][i])) i++;
-  return parts[0].slice(0, i).join(path.sep) || path.sep;
+  let common = parts[0].slice(0, i).join(path.sep) || path.sep;
+  if (/^[A-Za-z]:$/.test(common)) common += path.sep; // a bare "C:" means "the current folder on C:", not its root
+  return common;
 }
 
 // ---------- naming / grouping ----------

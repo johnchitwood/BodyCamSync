@@ -7,7 +7,10 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "icon": "electron scripts/make-icon.js"
+    "icon": "electron scripts/make-icon.js",
+    "smoke": "node scripts/smoke.js",
+    "pack:win": "electron-builder --win dir --x64",
+    "dist:win": "electron-builder --win nsis zip --x64 --publish never"
   },
   "author": "",
   "license": "UNLICENSED",
@@ -30,23 +33,18 @@
     },
     "files": [
       "src/**/*",
-      "package.json",
-      "!node_modules/ffprobe-static/bin/linux/**",
-      "!node_modules/ffprobe-static/bin/win32/**",
-      "!node_modules/ffprobe-static/bin/darwin/x64/**"
+      "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "resources/bin",
-        "to": "bin"
-      }
-    ],
+    "extraResources": [],
     "asarUnpack": [
       "node_modules/sherpa-onnx-node/**",
       "node_modules/sherpa-onnx-darwin-arm64/**",
+      "node_modules/sherpa-onnx-win-x64/**",
       "src/main/diarWorker.js",
       "node_modules/ffmpeg-static/ffmpeg",
-      "node_modules/ffprobe-static/bin/darwin/arm64/ffprobe"
+      "node_modules/ffmpeg-static/ffmpeg.exe",
+      "node_modules/ffprobe-static/bin/darwin/arm64/ffprobe",
+      "node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"
     ],
     "mac": {
       "target": [
@@ -59,7 +57,53 @@
       ],
       "icon": "build/icon.icns",
       "identity": null,
-      "category": "public.app-category.video"
+      "category": "public.app-category.video",
+      "files": [
+        "!node_modules/ffprobe-static/bin/linux/**",
+        "!node_modules/ffprobe-static/bin/win32/**",
+        "!node_modules/ffprobe-static/bin/darwin/x64/**",
+        "!node_modules/sherpa-onnx-win-x64/**"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/mac",
+          "to": "bin"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "files": [
+        "!node_modules/ffprobe-static/bin/linux/**",
+        "!node_modules/ffprobe-static/bin/darwin/**",
+        "!node_modules/ffprobe-static/bin/win32/ia32/**",
+        "!node_modules/sherpa-onnx-darwin-arm64/**"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/win",
+          "to": "bin"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     }
   }
 }

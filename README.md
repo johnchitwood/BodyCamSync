@@ -25,7 +25,7 @@ Click a camera to switch the view and the sound; grid and single-view layouts; f
 
 ## Transcript, speakers, and editing
 
-- Transcripts: local whisper.cpp (`resources/bin/whisper-cli`, Metal) with `ggml-large-v3-turbo-q5_0` + silero VAD.
+- Transcripts: local whisper.cpp (`resources/mac/whisper-cli` on Mac, `resources/win/whisper-cli.exe` on Windows; Metal on Mac) with `ggml-large-v3-turbo-q5_0` + silero VAD.
 - Speakers: sherpa-onnx (pyannote segmentation + wespeaker embeddings, threshold 0.4, biased toward
   splitting a voice rather than merging two people). Runs in a child process (`src/main/diarWorker.js`).
   Voices under 25 s of speech are grouped as "Other voices". Detected voices are suggestions, not identifications.
@@ -75,3 +75,18 @@ Space play/pause · ← → one frame · ⇧← ⇧→ one second · J / L ten s
 ## Design
 
 Two-tone: a navy "room" around the video and timeline, bond-paper panels for transcript and side tabs. Red (`#B5443A`) is the only accent. Type is Public Sans (interface, tabular numerals) and Source Serif 4 (headlines, transcript), bundled in `src/renderer/fonts/`. Cameras carry lettered exhibit tabs (A, B, C…). The transcript is set like pleading paper: running line numbers, a double red margin rule, "Page N" every 25 lines, and exports cite `page:line`.
+
+## Windows
+
+The app is cross-platform (Electron). Windows builds are made by GitHub Actions on a Windows machine, not on a Mac:
+Actions tab → "Build Windows app" → Run workflow. It compiles the speech engine (whisper.cpp) from source, runs
+`npm run smoke`, then publishes an installer and a portable zip as a downloadable artifact. Builds are unsigned, so
+Windows SmartScreen will warn on first run ("More info" → "Run anyway").
+
+Differences from the Mac build:
+- Speech engine runs on the CPU (AVX2), so transcripts take longer than on Apple silicon. The time estimate shown is a rough guess.
+- Local video copies use the NVIDIA/Intel/AMD hardware encoder when a quick test encode succeeds, otherwise software x264.
+- The window buttons sit at the top right; shortcuts use Ctrl instead of ⌘.
+
+`npm run smoke` checks ffmpeg, the sync engine (finds a known offset to the millisecond), the speech engine and the
+speaker-detection library on whichever platform it runs on.
