@@ -37,7 +37,7 @@
     el.classList.add('leaving');
     toastHide = setTimeout(() => { el.hidden = true; el.classList.remove('leaving'); }, 180);
   }
-  // action: { label, fn } adds a button (e.g. Undo). Clicking the notice or pressing its ✕ dismisses it.
+  // action: { label, fn } adds a button (e.g. Undo). Pressing its × dismisses it; it also fades on its own.
   function toast(msg, ms = 4200, action) {
     const el = $('#toast');
     clearTimeout(toastTimer); clearTimeout(toastHide);
@@ -183,7 +183,7 @@
       foot.classList.add('confirming');
       foot.innerHTML = `<span class="hint">Free about ${bytes(t)} across ${chosen.length} case${chosen.length === 1 ? '' : 's'}? Your original videos, transcripts, names and edits are not touched.${shrinkIds.length ? ' Shrinking reads the originals once, so keep the drive connected.' : ''}</span><span class="grow"></span><button class="btn small ghost" id="free-back">Back</button><button class="btn small primary" id="free-yes">Yes, free up</button>`;
       $('#free-back').onclick = () => renderFreePanel();
-      $('#free-yes').onclick = () => run(chosen, shrinkIds);
+      $('#free-yes').onclick = () => { $('#free-yes').disabled = true; $('#free-back').disabled = true; run(chosen, shrinkIds); };
       $('#free-back').focus();
     };
     const run = async (chosen, shrinkIds) => {

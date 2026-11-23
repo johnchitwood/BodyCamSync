@@ -321,12 +321,18 @@
   }
   function deleteLine(l) { mutate(l, l.deleted ? 'restore' : 'delete', l.text, '', (t) => { t.deleted = l.deleted ? undefined : true; }); }
 
-  function undoLast() {
+  // With a target (the entry a notice's Undo button belongs to), only that change is undone; if newer
+  // changes have been made since, or another case is open, say so instead of undoing something else.
+  function undoLast(target) {
     const log = TR.review.log;
     const undoable = (x) => x.kind === 'voice' || x.kind === 'merge' && x.snap || (x.prev !== undefined && x.key);
     let i = log.length - 1;
     while (i >= 0 && !undoable(log[i])) i--;
     if (i < 0) { C().toast('Nothing to undo'); return false; }
+    if (target && target.kind !== undefined && log[i] !== target && !(target.batch && log[i].batch === target.batch)) {
+      C().toast('You have made newer changes since. Use Undo in the transcript panel to step back one change at a time.', 6000);
+      return false;
+    }
     // a bulk change (many lines, or a matched pair of voices) is undone as one step
     const e = log[i];
     const group = e.batch ? log.filter((x) => x.batch === e.batch && undoable(x)) : [e];
@@ -527,7 +533,8 @@
         if (created) { const mine = TR.review.log.filter((x) => x.batch === TR._batch); if (mine[0]) mine[0].createdPerson = p.id; }
       }
     } finally { TR._batch = null; }
-    C().toast(pa && pb && pa.id !== pb.id ? `Merged “${pb.name}” into “${pa.name}”` : 'Matched', 8000, { label: 'Undo', fn: undoLast });
+    const mark = TR.review.log[TR.review.log.length - 1];
+    C().toast(pa && pb && pa.id !== pb.id ? `Merged “${pb.name}” into “${pa.name}”` : 'Matched', 8000, mark ? { label: 'Undo', fn: () => undoLast(mark) } : undefined);
   }
   function dismissMatch(s) { TR.review.dismissed.push(s.k); persist(); fillPeople(); }
   function hearMatch(s) {
@@ -624,7 +631,7 @@
     setCluster(gk, c, p.id);
   }
   function mergePeople(fromId, intoId) {
-    const from = personById(fromId), into = personById(intoId); if (!from || !into) return;
+    const from = personById(fromId), into = personById(intoId); if (!from || !into || fromId === intoId) return;
     const snap = { person: JSON.parse(JSON.stringify(from)), at: TR.review.people.findIndex((p) => p.id === fromId), clusters: [], lines: [] };
     for (const gk of Object.keys(TR.review.clusters)) for (const c of Object.keys(TR.review.clusters[gk])) if (TR.review.clusters[gk][c] === fromId) { snap.clusters.push([gk, c]); TR.review.clusters[gk][c] = intoId; }
     for (const [key, ed] of Object.entries(TR.review.lines)) {
@@ -632,9 +639,10 @@
       if (ed.person === fromId) ed.person = intoId; if (ed.parts) ed.parts.forEach((p) => { if (p.person === fromId) p.person = intoId; });
     }
     TR.review.people = TR.review.people.filter((p) => p.id !== fromId);
-    TR.review.log.push({ at: Date.now(), kind: 'merge', key: '', t: 0, cam: '', from: from.name, to: into.name, snap, batch: TR._batch || undefined });
+    const entry = { at: Date.now(), kind: 'merge', key: '', t: 0, cam: '', from: from.name, to: into.name, snap, batch: TR._batch || undefined };
+    TR.review.log.push(entry);
     persist(); afterChange();
-    if (!TR._batch) C().toast(`Merged “${from.name}” into “${into.name}”`, 8000, { label: 'Undo', fn: undoLast });
+    if (!TR._batch) C().toast(`Merged “${from.name}” into “${into.name}”`, 8000, { label: 'Undo', fn: () => undoLast(entry) });
   }
   function removePerson(id) {
     const p = personById(id); if (!p) return;
@@ -772,7 +780,7 @@
     $('#sel-delete').onclick = bulkDelete;
     $('#sel-clear').onclick = clearSel;
     $('#tr-follow').onclick = () => { TR.follow = !TR.follow; $('#tr-follow').classList.toggle('on', TR.follow); markNow(true); };
-    $('#tr-undo').onclick = undoLast;
+    $('#tr-undo').onclick = () => undoLast();
     $('#tr-export').onclick = async () => { const f = await bcs.invoke('transcript:export', `Transcript - ${S.project.name}.txt`, exportText()); if (f) C().toast('Transcript saved'); };
     const q = $('#tr-q'); if (q) q.oninput = C().debounce(() => { TR.q = q.value; fillList(); }, 160);
     $$('.chipbtn', p).forEach((b) => { b.onclick = () => { const id = b.dataset.cam; TR.off.has(id) ? TR.off.delete(id) : TR.off.add(id); b.classList.toggle('on', !TR.off.has(id)); fillList(); }; });
