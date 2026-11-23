@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>BodyCamSync</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file: 'unsafe-inline'; img-src file: data: blob:; media-src file: blob:; font-src file:;">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" data-view="welcome">
+    <header class="titlebar">
+      <div class="titlebar-title" id="tb-title"></div>
+      <div class="titlebar-actions" id="tb-actions"></div>
+    </header>
+
+    <!-- Welcome -->
+    <section id="view-welcome" class="view">
+      <div class="welcome">
+        <div class="wordmark">BodyCamSync</div>
+        <h1>Every camera on one clock.</h1>
+        <p class="lede">Open a folder of body camera and in-car video. The cameras are lined up by their audio, then you can play them together and switch the view or the sound with a click.</p>
+
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a folder of videos">
+          <div class="drop-icon" id="drop-icon"></div>
+          <div class="drop-title">Drop a folder or video files here</div>
+          <div class="drop-sub">or <span class="link">choose a folder</span> · <span class="link" id="pick-files">choose individual files</span></div>
+        </div>
+
+        <div class="assurance">
+          <span id="assure-icon"></span>
+          <span>Original files are opened read-only. Nothing is written to your evidence folder.</span>
+        </div>
+
+        <div class="recents" id="recents" hidden>
+          <div class="recents-head"><div class="section-label">Recent</div><button class="btn small ghost" id="free-btn">Free up space…</button></div>
+          <div id="free-panel" class="free-panel" hidden></div>
+          <div id="recents-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Processing -->
+    <section id="view-processing" class="view">
+      <div class="processing">
+        <div class="section-label">Preparing</div>
+        <h2 id="proc-name"></h2>
+        <div class="steps" id="proc-steps">
+          <div class="step" data-step="scan"><span class="dot"></span><div class="step-body"><div class="step-title">Read folder</div><div class="step-detail"></div></div></div>
+          <div class="step" data-step="audio"><span class="dot"></span><div class="step-body"><div class="step-title">Prepare audio</div><div class="step-detail"></div></div></div>
+          <div class="step" data-step="sync"><span class="dot"></span><div class="step-body"><div class="step-title">Match cameras by sound</div><div class="step-detail"></div></div></div>
+        </div>
+        <div class="bar"><div class="bar-fill" id="proc-bar"></div></div>
+        <div class="proc-foot" id="proc-foot">The first time a folder is opened this takes a few minutes, mostly reading from the drive. After that it opens immediately.</div>
+        <div class="proc-error" id="proc-error" hidden></div>
+        <button class="btn" id="proc-back" hidden>Back</button>
+      </div>
+    </section>
+
+    <!-- Workspace -->
+    <section id="view-workspace" class="view">
+      <div class="workspace">
+        <div class="stage-col">
+          <div class="stage" id="stage"></div>
+
+          <div class="transport">
+            <div class="tp-left">
+              <button class="icon-btn" id="btn-back" title="Back one frame  ←"></button>
+              <button class="play-btn" id="btn-play" title="Play / pause  Space"></button>
+              <button class="icon-btn" id="btn-fwd" title="Forward one frame  →"></button>
+            </div>
+            <div class="tp-time">
+              <div class="timecode" id="timecode">00:00:00.000</div>
+              <div class="timecode-sub" id="timecode-sub">of 00:00:00</div>
+            </div>
+            <div class="tp-right">
+              <div class="vol" title="Volume">
+                <span id="vol-icon"></span>
+                <input type="range" id="vol" min="0" max="1" step="0.01" value="1">
+              </div>
+              <select id="speed" class="select" title="Playback speed">
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.25">1.25×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+              </select>
+              <div class="seg" id="mode-seg" role="group" aria-label="Layout">
+                <button data-mode="grid" title="Grid  G"></button>
+                <button data-mode="focus" title="Single view  G"></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="timeline-wrap"><div class="tl-resizer" id="tl-resizer" title="Drag to resize · double-click to fit every camera"></div><canvas id="timeline"></canvas></div>
+        </div>
+
+        <aside class="side">
+          <nav class="tabs" id="tabs">
+            <button data-tab="cameras" class="on">Cameras</button>
+            <button data-tab="transcript">Transcript</button>
+            <button data-tab="sync">Sync</button>
+            <button data-tab="playback">Playback</button>
+            <button data-tab="files">Files</button>
+          </nav>
+          <div class="panel" id="panel"></div>
+        </aside>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="icons.js"></script>
+  <script src="engine.js"></script>
+  <script src="timeline.js"></script>
+  <script src="transcript.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
