@@ -14,22 +14,55 @@ const CACHE_VERSION = 3;
 
 function modelsDir() { const d = path.join(store.baseDir(), 'models'); fs.mkdirSync(d, { recursive: true }); return d; }
 
-function findEngine() {
-  const exe = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
+// Engines, best first. On Windows the build ships two: whisper-cli-gpu.exe (Vulkan: NVIDIA, AMD or Intel graphics)
+// and whisper-cli.exe (processor only). On a Mac the one engine uses the GPU (Metal) unless told -ng.
+// Set BCS_NO_GPU=1 to force the processor.
+function findFile(cands) { return cands.filter(Boolean).find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } }) || null; }
+function engineCandidates(exe) {
   const plat = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux';
-  const cands = [
-    process.env.BCS_WHISPER,
+  return [
     process.resourcesPath && path.join(process.resourcesPath, 'bin', exe),
     path.join(__dirname, '..', '..', 'resources', plat, exe),
+  ];
+}
+function findEngine() {
+  const exe = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
+  return findFile([
+    process.env.BCS_WHISPER,
+    ...engineCandidates(exe),
     ...(process.platform === 'darwin' ? ['/opt/homebrew/bin/whisper-cli', '/usr/local/bin/whisper-cli'] : []),
-  ].filter(Boolean);
-  return cands.find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } }) || null;
+  ]);
+}
+function findGpuEngine() {
+  if (process.env.BCS_WHISPER_GPU) return findFile([process.env.BCS_WHISPER_GPU]);
+  return process.platform === 'win32' ? findFile(engineCandidates('whisper-cli-gpu.exe')) : null;
+}
+
+// What to try, in order. Each attempt is { bin, args, gpu }. A failed GPU attempt falls through to the processor.
+let gpuFailed = null; // reason the GPU last failed in this session; the processor is used from then on
+let lastDevice = null; // what the last successful run actually used, from the engine's own log
+function attempts() {
+  const cpu = findEngine(), gpu = findGpuEngine();
+  const noGpu = process.env.BCS_NO_GPU === '1' || !!gpuFailed;
+  const out = [];
+  if (!noGpu && gpu) out.push({ bin: gpu, args: [], gpu: true });
+  if (cpu) {
+    if (!noGpu && !gpu && process.platform === 'darwin') out.push({ bin: cpu, args: [], gpu: true });
+    out.push({ bin: cpu, args: ['-ng'], gpu: false });
+  } else if (gpu) out.push({ bin: gpu, args: ['-ng'], gpu: false }); // the GPU build also runs on the processor
+  return out;
 }
 
 function status() {
   const md = modelsDir();
   const model = path.join(md, MODEL_NAME), vad = path.join(md, VAD_NAME);
-  return { engine: findEngine(), model: fs.existsSync(model) ? model : null, vad: fs.existsSync(vad) ? vad : null, modelName: MODEL_NAME, modelSizeMB: 574 };
+  const plan = attempts();
+  return {
+    engine: plan.length ? plan[0].bin : null,
+    gpu: plan.length ? plan[0].gpu : false, // whether the next run will try the graphics card first
+    gpuFailed, lastDevice,
+    model: fs.existsSync(model) ? model : null, vad: fs.existsSync(vad) ? vad : null, modelName: MODEL_NAME, modelSizeMB: 574,
+  };
 }
 
 // ---------- model download ----------
@@ -116,35 +149,78 @@ function clean(segs) {
 // ---------- running ----------
 let current = null; // { ac, child }
 
-function transcribeWav(wav, onProgress, signal) {
-  const st = status();
-  if (!st.engine) return Promise.reject(new Error('The transcription engine is not installed.'));
-  if (!st.model) return Promise.reject(new Error('The speech model has not been downloaded yet.'));
-  const tmpBase = path.join(path.dirname(wav), 'tr_' + path.basename(wav, '.wav'));
-  const args = ['-m', st.model, '-f', wav, '-l', 'en', '--output-json-full', '--output-file', tmpBase, '--print-progress', '--max-context', '0', '--suppress-nst', '--max-len', '110', '--split-on-word', '-t', '6'];
-  if (st.vad) args.push('--vad', '--vad-model', st.vad);
+// whisper.cpp logs "whisper_backend_init_gpu: using <device> backend" when it picks a graphics card,
+// and "no GPU found" when it falls back to the processor by itself.
+function deviceFromLog(log, gpu) {
+  if (!gpu) return { gpu: false, name: 'processor' };
+  const m = log.match(/whisper_backend_init_gpu: using (.+?) backend/);
+  if (m && !/no GPU found/.test(log)) {
+    const dev = m[1].trim();
+    if (/^MTL/.test(dev)) return { gpu: true, name: 'Apple graphics (Metal)' };
+    const vk = dev.match(/^Vulkan(\d+)$/);
+    if (vk) { // the Vulkan backend may also log the card's model ("ggml_vulkan: 0 = <name> (<driver>) | ...")
+      const card = log.match(new RegExp('ggml_vulkan: ' + vk[1] + ' = (.+?) \\('));
+      return { gpu: true, name: card ? card[1].trim() + ' (Vulkan)' : 'graphics card (Vulkan)' };
+    }
+    return { gpu: true, name: dev };
+  }
+  return { gpu: false, name: 'processor (no usable graphics card found)' };
+}
+
+function runEngine(attempt, args, onProgress, signal) {
   return new Promise((resolve, reject) => {
-    const child = spawn(st.engine, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let err = '';
+    const child = spawn(attempt.bin, [...args, ...attempt.args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let log = '';
     const onData = (d) => {
-      const s = d.toString(); err += s;
+      const s = d.toString(); log += s;
+      if (log.length > 1e6) log = log.slice(-5e5);
       const m = s.match(/progress\s*=\s*(\d+)%/g);
       if (m) { const last = m[m.length - 1].match(/(\d+)%/); onProgress(Number(last[1]) / 100); }
     };
     child.stderr.on('data', onData); child.stdout.on('data', onData);
     const abort = () => { try { child.kill('SIGKILL'); } catch (_) { /* ignore */ } };
     if (signal) signal.addEventListener('abort', abort, { once: true });
-    child.on('error', reject);
+    child.on('error', (e) => { if (signal) signal.removeEventListener('abort', abort); reject(e); });
     child.on('close', (code) => {
+      if (signal) signal.removeEventListener('abort', abort);
       if (signal && signal.aborted) return reject(new Error('cancelled'));
-      if (code !== 0) return reject(new Error((err.trim().split('\n').slice(-3).join(' ') || `Engine exited with code ${code}`)));
-      try {
-        const json = JSON.parse(fs.readFileSync(tmpBase + '.json', 'utf8'));
-        fs.rmSync(tmpBase + '.json', { force: true });
-        resolve(json);
-      } catch (e) { reject(new Error('Could not read the engine output: ' + e.message)); }
+      if (code !== 0) return reject(new Error((log.trim().split('\n').slice(-3).join(' ') || `Engine exited with code ${code}`)));
+      resolve(log);
     });
   });
+}
+
+async function transcribeWav(wav, onProgress, signal, onDevice) {
+  const st = status();
+  if (!st.engine) throw new Error('The transcription engine is not installed.');
+  if (!st.model) throw new Error('The speech model has not been downloaded yet.');
+  const tmpBase = path.join(path.dirname(wav), 'tr_' + path.basename(wav, '.wav'));
+  const args = ['-m', st.model, '-f', wav, '-l', 'en', '--output-json-full', '--output-file', tmpBase, '--print-progress', '--max-context', '0', '--suppress-nst', '--max-len', '110', '--split-on-word', '-t', '6'];
+  if (st.vad) args.push('--vad', '--vad-model', st.vad);
+  const plan = attempts();
+  let lastErr = null;
+  for (let i = 0; i < plan.length; i++) {
+    const a = plan[i];
+    if (signal && signal.aborted) throw new Error('cancelled');
+    fs.rmSync(tmpBase + '.json', { force: true });
+    if (onDevice) onDevice({ gpu: a.gpu, name: a.gpu ? 'graphics card' : 'processor', starting: true });
+    try {
+      const log = await runEngine(a, args, onProgress, signal);
+      let json;
+      try { json = JSON.parse(fs.readFileSync(tmpBase + '.json', 'utf8')); } catch (e) { throw new Error('Could not read the engine output: ' + e.message); }
+      fs.rmSync(tmpBase + '.json', { force: true });
+      lastDevice = deviceFromLog(log, a.gpu);
+      if (onDevice) onDevice(lastDevice);
+      return json;
+    } catch (e) {
+      if (e.message === 'cancelled') throw e;
+      lastErr = e;
+      // A graphics card that fails (missing or old driver, out of video memory) is not tried again this session.
+      if (a.gpu && i < plan.length - 1) { gpuFailed = lastErr.message; onProgress(0); continue; }
+      throw lastErr;
+    }
+  }
+  throw lastErr || new Error('The transcription engine is not installed.');
 }
 
 function trackList(project) {
@@ -175,11 +251,12 @@ async function transcribeProject(projectId, emit) {
       if (cached && cached.key === trackKey(t)) { doneDur += dur; emit({ groupId: g.id, track: t.index, state: 'done', overall: doneDur / totalDur, cached: true }); continue; }
       emit({ groupId: g.id, track: t.index, state: 'running', pct: 0, overall: doneDur / totalDur });
       try {
-        const json = await transcribeWav(t.wav, (p) => emit({ groupId: g.id, track: t.index, state: 'running', pct: p, overall: (doneDur + dur * p) / totalDur }), ac.signal);
+        let device = null;
+        const json = await transcribeWav(t.wav, (p) => emit({ groupId: g.id, track: t.index, state: 'running', pct: p, overall: (doneDur + dur * p) / totalDur, device }), ac.signal, (d) => { device = d; });
         const { segments, dropped } = clean(parseWhisperJson(json));
-        fs.writeFileSync(file, JSON.stringify({ key: trackKey(t), model: MODEL_NAME, at: Date.now(), dropped, segments }));
+        fs.writeFileSync(file, JSON.stringify({ key: trackKey(t), model: MODEL_NAME, at: Date.now(), device: device && device.name, dropped, segments }));
         doneDur += dur;
-        emit({ groupId: g.id, track: t.index, state: 'done', overall: doneDur / totalDur });
+        emit({ groupId: g.id, track: t.index, state: 'done', overall: doneDur / totalDur, device });
       } catch (e) {
         if (e.message === 'cancelled') { emit({ groupId: g.id, track: t.index, state: 'cancelled' }); break; }
         emit({ groupId: g.id, track: t.index, state: 'error', error: e.message });
@@ -206,4 +283,4 @@ function getTranscripts(projectId) {
   return { tracks, expected: trackList(project).length, audioMinutes, running: !!current };
 }
 
-module.exports = { status, downloadModels, transcribeProject, cancel, getTranscripts };
+module.exports = { deviceFromLog, status, downloadModels, transcribeProject, cancel, getTranscripts };

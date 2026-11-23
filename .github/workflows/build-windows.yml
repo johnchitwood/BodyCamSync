@@ -36,7 +36,23 @@ jobs:
           Copy-Item whisper.cpp/build/bin/Release/whisper-cli.exe resources/win/whisper-cli.exe
           Get-ChildItem whisper.cpp/build/bin/Release/*.dll -ErrorAction SilentlyContinue | Copy-Item -Destination resources/win
 
-      - name: Smoke test (ffmpeg, sync engine, speech engine, speaker detection)
+      # A second speech engine that runs on the graphics card through Vulkan, which the NVIDIA, AMD and Intel drivers
+      # all provide. The app tries it first and falls back to the processor engine above if the card can't be used.
+      - name: Install Vulkan SDK (to build the graphics-card engine)
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+          stripdown: true
+
+      - name: Build whisper.cpp (graphics card, Vulkan)
+        shell: pwsh
+        run: |
+          cmake -S whisper.cpp -B whisper.cpp/build-vk -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DWHISPER_BUILD_TESTS=OFF -DWHISPER_SDL2=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake --build whisper.cpp/build-vk --config Release --target whisper-cli -j 4
+          Copy-Item whisper.cpp/build-vk/bin/Release/whisper-cli.exe resources/win/whisper-cli-gpu.exe
+
+      - name: Smoke test (ffmpeg, sync engine, speech engines, speaker detection)
         run: npm run smoke
 
       - name: Build installer and portable zip

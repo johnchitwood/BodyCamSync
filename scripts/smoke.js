@@ -46,6 +46,16 @@ try {
     catch (e) { ok('speech engine starts', /usage/i.test(String((e.stdout || '') + (e.stderr || ''))), 'exit ' + e.status); }
   }
 
+  // Graphics-card speech engine (Windows build only). Reported, not required: a build machine without a graphics
+  // driver may be unable to start it, and the app falls back to the processor engine in that case.
+  const gpuEngine = path.join(__dirname, '..', 'resources', 'win', 'whisper-cli-gpu.exe');
+  if (process.platform === 'win32' && fs.existsSync(gpuEngine)) {
+    let started = false;
+    try { execFileSync(gpuEngine, ['-h'], { stdio: 'pipe' }); started = true; }
+    catch (e) { started = /usage/i.test(String((e.stdout || '') + (e.stderr || ''))); }
+    console.log(`INFO  graphics-card speech engine ${started ? 'starts' : 'did not start here (no Vulkan driver on this machine?)'}`);
+  }
+
   // Speaker detection library
   let sherpaOk = true, why = '';
   try { require('sherpa-onnx-node'); } catch (e) { sherpaOk = false; why = e.message.split('\n')[0]; }

@@ -48,16 +48,27 @@ async function buildProxy(projectId, groupId, angle, emit) {
       : codec === 'h264_qsv' ? hw(codec, ['-profile:v', 'high'])
       : codec === 'h264_amf' ? hw(codec, ['-usage', 'transcoding'])
       : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-g', '15', '-bf', '0'];
-    const argsFor = (codec) => ['-i', f.path, '-map', '0:v:0', '-an', '-vf', scale, ...codecArgsFor(codec), '-pix_fmt', 'yuv420p', '-fps_mode', 'cfr', '-r', '30', '-movflags', '+faststart', '-f', 'mp4', tmp];
+    // Decoding the original on the graphics card (-hwaccel auto: VideoToolbox on a Mac; D3D11VA, DXVA2, CUDA or QSV on
+    // Windows) takes most of the remaining work off the processor. ffmpeg decodes in software by itself when no
+    // hardware decoder fits the file. Set BCS_NO_HWACCEL=1 to turn it off.
+    const hwDecode = process.env.BCS_NO_HWACCEL === '1' ? [] : ['-hwaccel', 'auto'];
+    const argsFor = (codec, dec) => [...dec, '-i', f.path, '-map', '0:v:0', '-an', '-vf', scale, ...codecArgsFor(codec), '-pix_fmt', 'yuv420p', '-fps_mode', 'cfr', '-r', '30', '-movflags', '+faststart', '-f', 'mp4', tmp];
     emit({ groupId, angle, state: 'running', pct: 0 });
     const opts = { duration: f.duration, signal: ac.signal, onProgress: (p) => emit({ groupId, angle, state: 'running', pct: p }) };
-    try {
-      await media.runFfmpeg(enc.bin, argsFor(enc.codec), opts);
-    } catch (e) {
-      // a hardware encoder can pass the quick test and still fail on a real file: fall back to software once
-      if (enc.codec === 'libx264' || ac.signal.aborted) throw e;
-      fs.rmSync(tmp, { force: true });
-      await media.runFfmpeg(media.FFMPEG, argsFor('libx264'), opts);
+    // Fastest first; each step falls back to something more conservative if the one before fails on this file:
+    // GPU decode + chosen encoder, then software decode + chosen encoder, then all software.
+    const ladder = [];
+    const add = (bin, codec, dec) => { if (!ladder.some((x) => x.bin === bin && x.codec === codec && x.dec.length === dec.length)) ladder.push({ bin, codec, dec }); };
+    if (hwDecode.length) add(enc.bin, enc.codec, hwDecode);
+    add(enc.bin, enc.codec, []);
+    add(media.FFMPEG, 'libx264', []);
+    for (let i = 0; i < ladder.length; i++) {
+      const step = ladder[i];
+      try { await media.runFfmpeg(step.bin, argsFor(step.codec, step.dec), opts); break; }
+      catch (e) {
+        if (ac.signal.aborted || i === ladder.length - 1) throw e;
+        fs.rmSync(tmp, { force: true });
+      }
     }
     fs.renameSync(tmp, out);
     emit({ groupId, angle, state: 'done', pct: 1 });

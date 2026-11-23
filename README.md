@@ -25,7 +25,8 @@ Click a camera to switch the view and the sound; grid and single-view layouts; f
 
 ## Transcript, speakers, and editing
 
-- Transcripts: local whisper.cpp (`resources/mac/whisper-cli` on Mac, `resources/win/whisper-cli.exe` on Windows; Metal on Mac) with `ggml-large-v3-turbo-q5_0` + silero VAD.
+- Transcripts: local whisper.cpp (`resources/mac/whisper-cli` on Mac, `resources/win/whisper-cli-gpu.exe` / `whisper-cli.exe` on Windows) with `ggml-large-v3-turbo-q5_0` + silero VAD. Runs on the graphics card (Metal on Mac, Vulkan on Windows) and falls back to the processor if the card can't be used. The progress line shows which one is in use.
+- Overrides (environment variables): `BCS_NO_GPU=1` transcribes on the processor only; `BCS_NO_HWACCEL=1` decodes video in software when making local copies.
 - Speakers: sherpa-onnx (pyannote segmentation + wespeaker embeddings, threshold 0.4, biased toward
   splitting a voice rather than merging two people). Runs in a child process (`src/main/diarWorker.js`).
   Voices under 25 s of speech are grouped as "Other voices". Detected voices are suggestions, not identifications.
@@ -84,8 +85,13 @@ Actions tab → "Build Windows app" → Run workflow. It compiles the speech eng
 Windows SmartScreen will warn on first run ("More info" → "Run anyway").
 
 Differences from the Mac build:
-- Speech engine runs on the CPU (AVX2), so transcripts take longer than on Apple silicon. The time estimate shown is a rough guess.
-- Local video copies use the NVIDIA/Intel/AMD hardware encoder when a quick test encode succeeds, otherwise software x264.
+- Two speech engines ship: `whisper-cli-gpu.exe` runs on the graphics card through Vulkan (NVIDIA, AMD or Intel; the
+  card's normal driver provides Vulkan), and `whisper-cli.exe` runs on the processor (AVX2). The graphics-card engine is
+  tried first; if it can't start or fails (no driver, old driver, out of video memory), that file is redone on the
+  processor and the processor is used for the rest of the session. The time estimate shown is a rough guess.
+- Local video copies decode the original on the graphics card (`-hwaccel auto`) and use the NVIDIA/Intel/AMD hardware
+  encoder when a quick test encode succeeds. If a step fails on a file, it is retried with software decoding, then with
+  software x264.
 - The window buttons sit at the top right; shortcuts use Ctrl instead of ⌘.
 
 `npm run smoke` checks ffmpeg, the sync engine (finds a known offset to the millisecond), the speech engine and the
