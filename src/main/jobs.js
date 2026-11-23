@@ -56,9 +56,11 @@ async function buildProxy(projectId, groupId, angle, emit) {
     emit({ groupId, angle, state: 'running', pct: 0 });
     const opts = { duration: f.duration, signal: ac.signal, onProgress: (p) => emit({ groupId, angle, state: 'running', pct: p }) };
     // Fastest first; each step falls back to something more conservative if the one before fails on this file:
-    // GPU decode + chosen encoder, then software decode + chosen encoder, then all software.
+    // NVDEC (NVIDIA only) or other GPU decode + chosen encoder, then software decode + chosen encoder, then all software.
     const ladder = [];
-    const add = (bin, codec, dec) => { if (!ladder.some((x) => x.bin === bin && x.codec === codec && x.dec.length === dec.length)) ladder.push({ bin, codec, dec }); };
+    const add = (bin, codec, dec) => { if (!ladder.some((x) => x.bin === bin && x.codec === codec && x.dec.join(' ') === dec.join(' '))) ladder.push({ bin, codec, dec }); };
+    // With an NVIDIA encoder, ask for NVIDIA's decoder (NVDEC, via CUDA) by name first; -hwaccel auto may pick D3D11VA.
+    if (hwDecode.length && enc.codec === 'h264_nvenc') add(enc.bin, enc.codec, ['-hwaccel', 'cuda']);
     if (hwDecode.length) add(enc.bin, enc.codec, hwDecode);
     add(enc.bin, enc.codec, []);
     add(media.FFMPEG, 'libx264', []);

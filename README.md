@@ -90,7 +90,8 @@ Differences from the Mac build:
   tried first; if it can't start or fails (no driver, old driver, out of video memory), that file is redone on the
   processor and the processor is used for the rest of the session. The time estimate shown is a rough guess.
 - Local video copies decode the original on the graphics card (`-hwaccel auto`) and use the NVIDIA/Intel/AMD hardware
-  encoder when a quick test encode succeeds. If a step fails on a file, it is retried with software decoding, then with
+  encoder when a quick test encode succeeds. With an NVIDIA card, NVIDIA's own decoder (NVDEC) is asked for first. If a step
+  fails on a file, it is retried with the next option: other GPU decoding, software decoding, then
   software x264.
 - The window buttons sit at the top right; shortcuts use Ctrl instead of ⌘.
 
