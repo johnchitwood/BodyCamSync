@@ -69,7 +69,6 @@
   window.BCS_KEYS = { mod: IS_MAC ? '⌘' : 'Ctrl+', shift: IS_MAC ? '⇧' : 'Shift' };
   function setView(v) {
     $('#app').dataset.view = v; renderTitlebar();
-    if (!IS_MAC) bcs.invoke('ui:chrome', v === 'workspace');
   }
 
   function renderTitlebar() {

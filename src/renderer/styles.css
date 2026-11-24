@@ -96,11 +96,15 @@ button { cursor: pointer; }
 #app[data-view="processing"] #view-processing,
 #app[data-view="workspace"] #view-workspace { display: block; }
 /* the two full-page screens are all paper, including the title bar */
-#app[data-view="welcome"] .titlebar, #app[data-view="processing"] .titlebar {
+#app[data-view="welcome"] .titlebar, #app[data-view="processing"] .titlebar,
+/* Windows/Linux: the system window buttons sit on this bar, so it stays paper in every view */
+:root[data-platform="win32"] #app .titlebar, :root[data-platform="linux"] #app .titlebar {
   --bg: #f6f7f5; --surface-2: #edefec; --surface-3: #e2e5e1; --field: #ffffff; --line: #d6dad5; --line-2: #c3c9c3;
   --text: #17212c; --text-2: #444f5b; --text-3: #66717d; --accent: #1f2d3d; --accent-ink: #f6f7f5; --red: #b5443a;
-  border-bottom-color: transparent;
+  --good: #2c7a5a; --warn: #8f6410; --bad: #a83a30;
 }
+#app[data-view="welcome"] .titlebar, #app[data-view="processing"] .titlebar { border-bottom-color: transparent; }
+:root[data-platform="win32"] .titlebar :focus-visible, :root[data-platform="linux"] .titlebar :focus-visible { outline-color: #2f6fb0; }
 
 .section-label { font-size: 13px; font-weight: 650; color: var(--text); letter-spacing: 0; }
 .hint { color: var(--text-3); font-size: 12px; line-height: 1.5; }

@@ -23,8 +23,11 @@ function send(channel, payload) {
 }
 
 const IS_MAC = process.platform === 'darwin';
-const PAPER = { color: '#f6f7f5', symbol: '#17212c', height: 44 };
-const NAVY = { color: '#1f2d3d', symbol: '#eef1f4', height: 44 };
+// Windows/Linux draw the system window buttons over the right end of our title bar. That title bar is
+// always paper on these systems, with near-black button symbols, so the buttons never land on navy.
+// (Recolouring the buttons at runtime with setTitleBarOverlay is unreliable on Windows: the symbols
+// could stay dark on the navy bar until hovered, which made minimize and maximize invisible.)
+const PAPER = { color: '#f6f7f5', symbolColor: '#0b1118', height: 44 };
 
 function createWindow() {
   win = new BrowserWindow({
@@ -37,7 +40,7 @@ function createWindow() {
     ...(IS_MAC
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 17 } }
       // Windows/Linux: our own title bar, with the system window buttons drawn over its right end
-      : { titleBarStyle: 'hidden', titleBarOverlay: { color: PAPER.color, symbolColor: PAPER.symbol, height: 44 }, autoHideMenuBar: true }),
+      : { titleBarStyle: 'hidden', titleBarOverlay: PAPER, autoHideMenuBar: true }),
     title: 'BodyCamSync',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -166,11 +169,8 @@ ipcMain.handle('transcript:export', async (_e, suggested, text) => {
   fs.writeFileSync(r.filePath, text, 'utf8');
   return r.filePath;
 });
-// Windows/Linux: recolour the system window buttons to sit on the paper or navy title bar.
-ipcMain.handle('ui:chrome', (_e, dark) => {
-  if (!IS_MAC && win && win.setTitleBarOverlay) { try { win.setTitleBarOverlay(dark ? NAVY : PAPER); } catch (_) { /* not supported */ } }
-  return true;
-});
+// Kept for older renderers; the window buttons now keep one fixed, high-contrast colour.
+ipcMain.handle('ui:chrome', () => true);
 ipcMain.handle('shell:reveal', (_e, p) => { shell.showItemInFolder(p); return true; });
 
 // ---------- debug / automation (only with BCS_DEBUG=1) ----------
