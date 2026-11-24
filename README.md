@@ -84,9 +84,17 @@ Two-tone: a navy "room" around the video and timeline, bond-paper panels for tra
 
 ## Windows
 
+**Download (newest release):**
+- Portable zip, no install: https://github.com/johnchitwood/BodyCamSync/releases/latest/download/BodyCamSync-Windows-x64.zip
+- Installer: https://github.com/johnchitwood/BodyCamSync/releases/latest/download/BodyCamSync-Windows-x64-Setup.exe
+
+These links always point at the newest release. To publish a new one, push a version tag (for example
+`git tag v0.2.0 && git push origin v0.2.0`); the workflow below builds it and attaches both files to a public
+GitHub Release.
+
 The app is cross-platform (Electron). Windows builds are made by GitHub Actions on a Windows machine, not on a Mac:
 Actions tab → "Build Windows app" → Run workflow. It compiles the speech engine (whisper.cpp) from source, runs
-`npm run smoke`, then publishes an installer and a portable zip as a downloadable artifact. Builds are unsigned, so
+`npm run smoke`, then saves an installer and a portable zip as an artifact (visible only to signed-in repo users, kept 90 days); a tag push also publishes them as a release. Builds are unsigned, so
 Windows SmartScreen will warn on first run ("More info" → "Run anyway").
 
 Differences from the Mac build:

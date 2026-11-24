@@ -1,6 +1,9 @@
 name: Build Windows app
 
-# Run it by hand from the Actions tab ("Run workflow"), or push a tag such as v0.2.0.
+# Run it by hand from the Actions tab ("Run workflow") to get a private test build, or push a tag such as v0.2.0
+# to also publish a public GitHub Release. The newest release is always downloadable at
+#   https://github.com/johnchitwood/BodyCamSync/releases/latest/download/BodyCamSync-Windows-x64.zip
+#   https://github.com/johnchitwood/BodyCamSync/releases/latest/download/BodyCamSync-Windows-x64-Setup.exe
 on:
   workflow_dispatch:
   push:
@@ -8,6 +11,9 @@ on:
 
 env:
   WHISPER_CPP_TAG: v1.9.5   # speech engine version, built from source below
+
+permissions:
+  contents: read
 
 jobs:
   windows:
@@ -65,3 +71,25 @@ jobs:
             dist/*.exe
             dist/*.zip
           if-no-files-found: error
+
+  # Only for tag pushes: attach the build to a public GitHub Release so it has a permanent download link.
+  release:
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: BodyCamSync-windows
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          make_latest: true
