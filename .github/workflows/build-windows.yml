@@ -4,6 +4,7 @@ name: Build Windows app
 # to also publish a public GitHub Release. The newest release is always downloadable at
 #   https://github.com/johnchitwood/BodyCamSync/releases/latest/download/BodyCamSync-Windows-x64.zip
 #   https://github.com/johnchitwood/BodyCamSync/releases/latest/download/BodyCamSync-Windows-x64-Setup.exe
+# Installed copies update themselves from the newest regular (not pre-release) release, using latest.yml.
 on:
   workflow_dispatch:
   push:
@@ -28,6 +29,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The updater compares the version inside the app with latest.yml, so a release built from tag v0.2.0 must
+      # say 0.2.0 inside. Taking it from the tag means package.json never has to be edited by hand.
+      - name: Use the tag as the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: npm version $env:GITHUB_REF_NAME.TrimStart('v') --no-git-tag-version --allow-same-version
 
       # The speech engine is compiled here so no unknown binary is downloaded. AVX2 (not "this machine's"
       # CPU) keeps it runnable on any PC from the last decade; the C runtime is linked in so no
@@ -70,6 +78,8 @@ jobs:
           path: |
             dist/*.exe
             dist/*.zip
+            dist/*.blockmap
+            dist/latest.yml
           if-no-files-found: error
 
   # Only for tag pushes: attach the build to a public GitHub Release so it has a permanent download link.
@@ -87,9 +97,12 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          # latest.yml and the .blockmap are what the installed app's updater reads to find and download new versions.
           files: |
             dist/*.exe
             dist/*.zip
+            dist/*.blockmap
+            dist/latest.yml
           fail_on_unmatched_files: true
           generate_release_notes: true
           make_latest: true

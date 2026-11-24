@@ -14,6 +14,7 @@ const jobs = require('./jobs');
 const transcribe = require('./transcribe');
 const speakers = require('./speakers');
 const review = require('./review');
+const updater = require('./updater');
 
 let win = null;
 const DEBUG = !!process.env.BCS_DEBUG;
@@ -87,6 +88,7 @@ function showAbout() {
 }
 function helpItems() {
   return [
+    { label: 'Check for Updates…', click: () => updater.check(true) },
     { label: 'Download the Latest Version', click: () => shell.openExternal(`${REPO_URL}/releases`) },
     { label: 'Report a Problem', click: () => shell.openExternal(`${REPO_URL}/issues/new`) },
     ...(IS_MAC ? [] : [{ type: 'separator' }, { label: 'About BodyCamSync', click: showAbout }]),
@@ -109,6 +111,7 @@ app.whenReady().then(() => {
   store.init(app.getPath('userData'));
   buildMenu();
   createWindow();
+  updater.init(() => win);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { jobs.cancelProxies(); jobs.cancelHash(); app.quit(); });
