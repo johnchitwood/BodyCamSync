@@ -61,17 +61,46 @@ function createWindow() {
   if (process.env.BCS_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' });
 }
 
+const REPO_URL = 'https://github.com/johnchitwood/BodyCamSync';
+
+// File and Help are shared by the application menu (macOS menu bar, keyboard shortcuts everywhere)
+// and the File / Help buttons drawn in our own title bar on Windows and Linux.
+function fileItems(withRecents) {
+  // Listing recent cases measures their folders on disk, so it is only built when the menu is opened.
+  const recents = withRecents ? store.recents().filter((r) => r.exists).slice(0, 10) : [];
+  return [
+    { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => send('menu:open') },
+    { label: 'Open Files…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('menu:openFiles') },
+    ...(withRecents ? [{ label: 'Open Recent', submenu: recents.length
+      ? recents.map((r) => ({ label: r.name.replace(/&/g, '&&'), click: () => send('menu:openRecent', r.selection || r.folder) }))
+      : [{ label: 'No recent cases', enabled: false }] }] : []),
+    { type: 'separator' }, IS_MAC ? { role: 'close' } : { role: 'quit', label: 'Exit', accelerator: 'Alt+F4' },
+  ];
+}
+function showAbout() {
+  const v = process.versions;
+  dialog.showMessageBox(win, {
+    type: 'info', title: 'About BodyCamSync', buttons: ['OK'],
+    message: `BodyCamSync ${app.getVersion()}`,
+    detail: `Synchronized multi-camera video review.\n\nElectron ${v.electron} · Chromium ${v.chrome} · Node ${v.node}\n${process.platform} ${process.arch}`,
+  });
+}
+function helpItems() {
+  return [
+    { label: 'Download the Latest Version', click: () => shell.openExternal(`${REPO_URL}/releases`) },
+    { label: 'Report a Problem', click: () => shell.openExternal(`${REPO_URL}/issues/new`) },
+    ...(IS_MAC ? [] : [{ type: 'separator' }, { label: 'About BodyCamSync', click: showAbout }]),
+  ];
+}
+
 function buildMenu() {
   const template = [
-    ...(IS_MAC ? [{ label: 'BodyCamSync', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
-    { label: 'File', submenu: [
-      { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => send('menu:open') },
-      { label: 'Open Files…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('menu:openFiles') },
-      { type: 'separator' }, IS_MAC ? { role: 'close' } : { role: 'quit', label: 'Exit' },
-    ] },
+    ...(IS_MAC ? [{ label: 'BodyCamSync', submenu: [{ label: 'About BodyCamSync', click: showAbout }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
+    { label: 'File', submenu: fileItems() },
     { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'togglefullscreen' }, { type: 'separator' }, { role: 'toggleDevTools' }] },
     { label: 'Window', submenu: [{ role: 'minimize' }, ...(IS_MAC ? [{ role: 'zoom' }] : [])] },
+    { role: 'help', label: 'Help', submenu: helpItems() },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -171,6 +200,13 @@ ipcMain.handle('transcript:export', async (_e, suggested, text) => {
 });
 // Kept for older renderers; the window buttons now keep one fixed, high-contrast colour.
 ipcMain.handle('ui:chrome', () => true);
+// Windows/Linux: the File and Help buttons in our title bar open these menus just below themselves.
+ipcMain.handle('menu:popup', (_e, name, x, y) => {
+  const items = name === 'help' ? helpItems() : name === 'file' ? fileItems(true) : null;
+  if (!items || !win) return false;
+  Menu.buildFromTemplate(items).popup({ window: win, x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0) });
+  return true;
+});
 ipcMain.handle('shell:reveal', (_e, p) => { shell.showItemInFolder(p); return true; });
 
 // ---------- debug / automation (only with BCS_DEBUG=1) ----------

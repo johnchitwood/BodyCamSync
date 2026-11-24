@@ -86,7 +86,14 @@ button { cursor: pointer; }
   background: var(--bg); color: var(--text);
   border-bottom: 1px solid var(--line);
 }
-:root[data-platform="win32"] .titlebar, :root[data-platform="linux"] .titlebar { padding: 0 154px 0 18px; } /* room for the system window buttons on the right */
+:root[data-platform="win32"] .titlebar, :root[data-platform="linux"] .titlebar { padding: 0 154px 0 8px; } /* room for the system window buttons on the right */
+.tb-menus { display: flex; gap: 2px; margin-right: 14px; -webkit-app-region: no-drag; }
+.tb-menus[hidden] { display: none; }
+.tb-menu { height: 28px; padding: 0 10px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); font-size: 13px; }
+.tb-menu:hover, .tb-menu:focus-visible { background: var(--surface-3); }
+:root[data-platform="win32"] .titlebar, :root[data-platform="linux"] .titlebar { justify-content: flex-start; }
+:root[data-platform="win32"] .titlebar-actions, :root[data-platform="linux"] .titlebar-actions { margin-left: auto; }
+:root[data-platform="win32"] .titlebar-title, :root[data-platform="linux"] .titlebar-title { flex: 0 1 auto; min-width: 0; margin-right: 12px; }
 .titlebar-title { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titlebar-title b { color: var(--text); font-weight: 600; }
 .titlebar-actions { display: flex; gap: 8px; -webkit-app-region: no-drag; }
