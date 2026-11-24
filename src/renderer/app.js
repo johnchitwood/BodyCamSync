@@ -66,10 +66,20 @@
   };
   const IS_MAC = bcs.platform === 'darwin';
   document.documentElement.dataset.platform = bcs.platform;
+  // Windows/Linux: File and Help in the title bar, since the system menu bar is hidden there.
+  if (!IS_MAC) {
+    const nav = $('#tb-menus'); nav.hidden = false;
+    const pop = (btn) => { const r = btn.getBoundingClientRect(); bcs.invoke('menu:popup', btn.dataset.menu, r.left, r.bottom); };
+    nav.querySelectorAll('.tb-menu').forEach((btn) => { btn.onclick = () => pop(btn); });
+    document.addEventListener('keydown', (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const k = e.key.toLowerCase(); const btn = k === 'f' ? nav.querySelector('[data-menu="file"]') : k === 'h' ? nav.querySelector('[data-menu="help"]') : null;
+      if (btn) { e.preventDefault(); pop(btn); }
+    });
+  }
   window.BCS_KEYS = { mod: IS_MAC ? '⌘' : 'Ctrl+', shift: IS_MAC ? '⇧' : 'Shift' };
   function setView(v) {
     $('#app').dataset.view = v; renderTitlebar();
-    if (!IS_MAC) bcs.invoke('ui:chrome', v === 'workspace');
   }
 
   function renderTitlebar() {
@@ -255,6 +265,7 @@
     });
     bcs.on('menu:open', chooseFolder);
     bcs.on('menu:openFiles', chooseFiles);
+    bcs.on('menu:openRecent', (sel) => { if (sel) openFolder(sel); });
     loadRecents();
   }
 

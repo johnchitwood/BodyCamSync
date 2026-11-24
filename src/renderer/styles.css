@@ -86,7 +86,14 @@ button { cursor: pointer; }
   background: var(--bg); color: var(--text);
   border-bottom: 1px solid var(--line);
 }
-:root[data-platform="win32"] .titlebar, :root[data-platform="linux"] .titlebar { padding: 0 154px 0 18px; } /* room for the system window buttons on the right */
+:root[data-platform="win32"] .titlebar, :root[data-platform="linux"] .titlebar { padding: 0 154px 0 8px; } /* room for the system window buttons on the right */
+.tb-menus { display: flex; gap: 2px; margin-right: 14px; -webkit-app-region: no-drag; }
+.tb-menus[hidden] { display: none; }
+.tb-menu { height: 28px; padding: 0 10px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); font-size: 13px; }
+.tb-menu:hover, .tb-menu:focus-visible { background: var(--surface-3); }
+:root[data-platform="win32"] .titlebar, :root[data-platform="linux"] .titlebar { justify-content: flex-start; }
+:root[data-platform="win32"] .titlebar-actions, :root[data-platform="linux"] .titlebar-actions { margin-left: auto; }
+:root[data-platform="win32"] .titlebar-title, :root[data-platform="linux"] .titlebar-title { flex: 0 1 auto; min-width: 0; margin-right: 12px; }
 .titlebar-title { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titlebar-title b { color: var(--text); font-weight: 600; }
 .titlebar-actions { display: flex; gap: 8px; -webkit-app-region: no-drag; }
@@ -96,11 +103,15 @@ button { cursor: pointer; }
 #app[data-view="processing"] #view-processing,
 #app[data-view="workspace"] #view-workspace { display: block; }
 /* the two full-page screens are all paper, including the title bar */
-#app[data-view="welcome"] .titlebar, #app[data-view="processing"] .titlebar {
+#app[data-view="welcome"] .titlebar, #app[data-view="processing"] .titlebar,
+/* Windows/Linux: the system window buttons sit on this bar, so it stays paper in every view */
+:root[data-platform="win32"] #app .titlebar, :root[data-platform="linux"] #app .titlebar {
   --bg: #f6f7f5; --surface-2: #edefec; --surface-3: #e2e5e1; --field: #ffffff; --line: #d6dad5; --line-2: #c3c9c3;
   --text: #17212c; --text-2: #444f5b; --text-3: #66717d; --accent: #1f2d3d; --accent-ink: #f6f7f5; --red: #b5443a;
-  border-bottom-color: transparent;
+  --good: #2c7a5a; --warn: #8f6410; --bad: #a83a30;
 }
+#app[data-view="welcome"] .titlebar, #app[data-view="processing"] .titlebar { border-bottom-color: transparent; }
+:root[data-platform="win32"] .titlebar :focus-visible, :root[data-platform="linux"] .titlebar :focus-visible { outline-color: #2f6fb0; }
 
 .section-label { font-size: 13px; font-weight: 650; color: var(--text); letter-spacing: 0; }
 .hint { color: var(--text-3); font-size: 12px; line-height: 1.5; }

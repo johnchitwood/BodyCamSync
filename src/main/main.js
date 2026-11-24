@@ -23,8 +23,11 @@ function send(channel, payload) {
 }
 
 const IS_MAC = process.platform === 'darwin';
-const PAPER = { color: '#f6f7f5', symbol: '#17212c', height: 44 };
-const NAVY = { color: '#1f2d3d', symbol: '#eef1f4', height: 44 };
+// Windows/Linux draw the system window buttons over the right end of our title bar. That title bar is
+// always paper on these systems, with near-black button symbols, so the buttons never land on navy.
+// (Recolouring the buttons at runtime with setTitleBarOverlay is unreliable on Windows: the symbols
+// could stay dark on the navy bar until hovered, which made minimize and maximize invisible.)
+const PAPER = { color: '#f6f7f5', symbolColor: '#0b1118', height: 44 };
 
 function createWindow() {
   win = new BrowserWindow({
@@ -37,7 +40,7 @@ function createWindow() {
     ...(IS_MAC
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 17 } }
       // Windows/Linux: our own title bar, with the system window buttons drawn over its right end
-      : { titleBarStyle: 'hidden', titleBarOverlay: { color: PAPER.color, symbolColor: PAPER.symbol, height: 44 }, autoHideMenuBar: true }),
+      : { titleBarStyle: 'hidden', titleBarOverlay: PAPER, autoHideMenuBar: true }),
     title: 'BodyCamSync',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -58,17 +61,46 @@ function createWindow() {
   if (process.env.BCS_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' });
 }
 
+const REPO_URL = 'https://github.com/johnchitwood/BodyCamSync';
+
+// File and Help are shared by the application menu (macOS menu bar, keyboard shortcuts everywhere)
+// and the File / Help buttons drawn in our own title bar on Windows and Linux.
+function fileItems(withRecents) {
+  // Listing recent cases measures their folders on disk, so it is only built when the menu is opened.
+  const recents = withRecents ? store.recents().filter((r) => r.exists).slice(0, 10) : [];
+  return [
+    { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => send('menu:open') },
+    { label: 'Open Files…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('menu:openFiles') },
+    ...(withRecents ? [{ label: 'Open Recent', submenu: recents.length
+      ? recents.map((r) => ({ label: r.name.replace(/&/g, '&&'), click: () => send('menu:openRecent', r.selection || r.folder) }))
+      : [{ label: 'No recent cases', enabled: false }] }] : []),
+    { type: 'separator' }, IS_MAC ? { role: 'close' } : { role: 'quit', label: 'Exit', accelerator: 'Alt+F4' },
+  ];
+}
+function showAbout() {
+  const v = process.versions;
+  dialog.showMessageBox(win, {
+    type: 'info', title: 'About BodyCamSync', buttons: ['OK'],
+    message: `BodyCamSync ${app.getVersion()}`,
+    detail: `Synchronized multi-camera video review.\n\nElectron ${v.electron} · Chromium ${v.chrome} · Node ${v.node}\n${process.platform} ${process.arch}`,
+  });
+}
+function helpItems() {
+  return [
+    { label: 'Download the Latest Version', click: () => shell.openExternal(`${REPO_URL}/releases`) },
+    { label: 'Report a Problem', click: () => shell.openExternal(`${REPO_URL}/issues/new`) },
+    ...(IS_MAC ? [] : [{ type: 'separator' }, { label: 'About BodyCamSync', click: showAbout }]),
+  ];
+}
+
 function buildMenu() {
   const template = [
-    ...(IS_MAC ? [{ label: 'BodyCamSync', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
-    { label: 'File', submenu: [
-      { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => send('menu:open') },
-      { label: 'Open Files…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('menu:openFiles') },
-      { type: 'separator' }, IS_MAC ? { role: 'close' } : { role: 'quit', label: 'Exit' },
-    ] },
+    ...(IS_MAC ? [{ label: 'BodyCamSync', submenu: [{ label: 'About BodyCamSync', click: showAbout }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
+    { label: 'File', submenu: fileItems() },
     { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'togglefullscreen' }, { type: 'separator' }, { role: 'toggleDevTools' }] },
     { label: 'Window', submenu: [{ role: 'minimize' }, ...(IS_MAC ? [{ role: 'zoom' }] : [])] },
+    { role: 'help', label: 'Help', submenu: helpItems() },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -166,9 +198,13 @@ ipcMain.handle('transcript:export', async (_e, suggested, text) => {
   fs.writeFileSync(r.filePath, text, 'utf8');
   return r.filePath;
 });
-// Windows/Linux: recolour the system window buttons to sit on the paper or navy title bar.
-ipcMain.handle('ui:chrome', (_e, dark) => {
-  if (!IS_MAC && win && win.setTitleBarOverlay) { try { win.setTitleBarOverlay(dark ? NAVY : PAPER); } catch (_) { /* not supported */ } }
+// Kept for older renderers; the window buttons now keep one fixed, high-contrast colour.
+ipcMain.handle('ui:chrome', () => true);
+// Windows/Linux: the File and Help buttons in our title bar open these menus just below themselves.
+ipcMain.handle('menu:popup', (_e, name, x, y) => {
+  const items = name === 'help' ? helpItems() : name === 'file' ? fileItems(true) : null;
+  if (!items || !win) return false;
+  Menu.buildFromTemplate(items).popup({ window: win, x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0) });
   return true;
 });
 ipcMain.handle('shell:reveal', (_e, p) => { shell.showItemInFolder(p); return true; });
