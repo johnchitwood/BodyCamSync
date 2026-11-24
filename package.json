@@ -98,12 +98,14 @@
           "from": "resources/win",
           "to": "bin"
         }
-      ]
+      ],
+      "artifactName": "${productName}-Windows-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Windows-x64-Setup.${ext}"
     }
   }
 }
