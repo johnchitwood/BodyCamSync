@@ -513,3 +513,33 @@ mark { background: var(--hl); color: var(--text); border-radius: 1px; padding: 0
 .free-opt b { font-weight: 600; color: var(--text); white-space: nowrap; }
 .free-foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line-2); }
 .card.free { padding-left: 16px; }
+
+/* ---------- live captions (screen only; never burned into footage) ---------- */
+.cc-btn.on { background: var(--text); color: var(--bg); }
+.cc-btn.on:hover { background: var(--text); color: var(--bg); filter: brightness(1.08); }
+.cc {
+  position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); z-index: 2;
+  width: max-content; max-width: 92%; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  pointer-events: none; font-family: var(--font); --cc-fs: clamp(12px, 1.9vw, 20px);
+}
+.cc[hidden] { display: none; }
+.stage[data-cc-size="s"] .cc { --cc-fs: clamp(11px, 1.4vw, 16px); }
+.stage[data-cc-size="l"] .cc { --cc-fs: clamp(14px, 2.6vw, 30px); }
+.stage[data-mode="grid"] .tile:not(:only-child) .cc { --cc-fs: clamp(11px, 1.2vw, 17px); }
+.stage[data-mode="grid"][data-cc-size="l"] .tile:not(:only-child) .cc { --cc-fs: clamp(13px, 1.6vw, 22px); }
+.cc-line {
+  max-width: 100%; padding: .18em .5em .22em; border-radius: 2px; background: rgba(6, 9, 13, .82); color: #f4f5f2;
+  font-size: var(--cc-fs); line-height: 1.32; text-align: center; font-weight: 500;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.cc-who { display: inline-block; margin-right: .45em; font-weight: 700; color: var(--sp, #c9ced6); }
+.cc-who::after { content: ':'; color: #c9ced6; }
+.cc-who.named { color: var(--sp, #fff); }
+.cc-who.auto { font-weight: 600; }
+.cc-who.auto em {
+  font-style: normal; font-size: .62em; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
+  margin-left: .45em; padding: .05em .35em; border: 1px dashed currentColor; border-radius: 2px; vertical-align: .18em; opacity: .9;
+}
+.cc-who.auto::after { margin-left: .1em; }
+.cc-who.none { color: #9aa3ad; font-weight: 600; font-style: italic; }
+.cc-text .lowc { color: #a9b0b8; text-decoration: underline dotted; text-decoration-color: #6b737e; text-underline-offset: .18em; }

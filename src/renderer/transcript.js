@@ -163,6 +163,7 @@
     kept.sort((a, b) => lineT(a) - lineT(b));
     kept.forEach((l, k) => { l.n = k + 1; }); // running line numbers, like a pleading page
     TR.lines = kept;
+    if (window.BCS.captions) setTimeout(() => window.BCS.captions.update(), 0); // on-screen captions follow edits
   }
 
   // ---------- one line ----------
