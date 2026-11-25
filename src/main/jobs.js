@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const media = require('./media');
 const store = require('./store');
+const staging = require('./staging');
 
 // ---------- local proxies (derived copies; originals are never touched) ----------
 const proxyJobs = new Map(); // key -> AbortController
@@ -40,6 +41,8 @@ async function buildProxy(projectId, groupId, angle, emit) {
     const free = freeBytes();
     if (free - need < DISK_RESERVE) throw new Error(`Not enough free disk space for local copies (${(free / 1e9).toFixed(0)} GB free; keeping ${(DISK_RESERVE / 1e9).toFixed(0)} GB in reserve).`);
     const enc = await media.proxyEncoder();
+    // Read the temporary local copy made while the audio was prepared, if there is one, instead of the drive again.
+    const input = staging.find(projectId, groupId, angle, f) || f.path;
     const scale = f.height > 720 ? 'scale=1280:-2:flags=bicubic' : 'scale=iw:ih';
     // Short keyframe interval (-g 15) and no B-frames keep seeking instant. Hardware encoders are rate-controlled.
     const hw = (name, extra = []) => ['-c:v', name, '-b:v', '5M', '-maxrate', '8M', '-g', '15', '-bf', '0', ...extra];
@@ -52,21 +55,26 @@ async function buildProxy(projectId, groupId, angle, emit) {
     // Windows) takes most of the remaining work off the processor. ffmpeg decodes in software by itself when no
     // hardware decoder fits the file. Set BCS_NO_HWACCEL=1 to turn it off.
     const hwDecode = process.env.BCS_NO_HWACCEL === '1' ? [] : ['-hwaccel', 'auto'];
-    const argsFor = (codec, dec) => [...dec, '-i', f.path, '-map', '0:v:0', '-an', '-vf', scale, ...codecArgsFor(codec), '-pix_fmt', 'yuv420p', '-fps_mode', 'cfr', '-r', '30', '-movflags', '+faststart', '-f', 'mp4', tmp];
+    // Whole-GPU path (NVIDIA): frames stay on the card from decoding through resizing (scale_cuda) to encoding,
+    // instead of being copied to the processor to be resized and back again. nv12 is 8-bit 4:2:0, the same as yuv420p.
+    const gpuScale = f.height > 720 ? 'scale_cuda=1280:-2:format=nv12' : 'scale_cuda=format=nv12';
+    const argsFor = (codec, dec, gpu) => [...dec, '-i', input, '-map', '0:v:0', '-an', '-vf', gpu ? gpuScale : scale, ...codecArgsFor(codec), ...(gpu ? [] : ['-pix_fmt', 'yuv420p']), '-fps_mode', 'cfr', '-r', '30', '-movflags', '+faststart', '-f', 'mp4', tmp];
     emit({ groupId, angle, state: 'running', pct: 0 });
     const opts = { duration: f.duration, signal: ac.signal, onProgress: (p) => emit({ groupId, angle, state: 'running', pct: p }) };
     // Fastest first; each step falls back to something more conservative if the one before fails on this file:
     // NVDEC (NVIDIA only) or other GPU decode + chosen encoder, then software decode + chosen encoder, then all software.
     const ladder = [];
-    const add = (bin, codec, dec) => { if (!ladder.some((x) => x.bin === bin && x.codec === codec && x.dec.join(' ') === dec.join(' '))) ladder.push({ bin, codec, dec }); };
-    // With an NVIDIA encoder, ask for NVIDIA's decoder (NVDEC, via CUDA) by name first; -hwaccel auto may pick D3D11VA.
+    const add = (bin, codec, dec, gpu = false) => { if (!ladder.some((x) => x.bin === bin && x.codec === codec && x.gpu === gpu && x.dec.join(' ') === dec.join(' '))) ladder.push({ bin, codec, dec, gpu }); };
+    // With an NVIDIA encoder, first keep every frame on the card (NVDEC -> scale_cuda -> NVENC), then ask for NVIDIA's
+    // decoder (NVDEC, via CUDA) by name with resizing on the processor; -hwaccel auto may pick D3D11VA.
+    if (hwDecode.length && enc.codec === 'h264_nvenc') add(enc.bin, enc.codec, ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'], true);
     if (hwDecode.length && enc.codec === 'h264_nvenc') add(enc.bin, enc.codec, ['-hwaccel', 'cuda']);
     if (hwDecode.length) add(enc.bin, enc.codec, hwDecode);
     add(enc.bin, enc.codec, []);
     add(media.FFMPEG, 'libx264', []);
     for (let i = 0; i < ladder.length; i++) {
       const step = ladder[i];
-      try { await media.runFfmpeg(step.bin, argsFor(step.codec, step.dec), opts); break; }
+      try { await media.runFfmpeg(step.bin, argsFor(step.codec, step.dec, step.gpu), opts); break; }
       catch (e) {
         if (ac.signal.aborted || i === ladder.length - 1) throw e;
         fs.rmSync(tmp, { force: true });
@@ -77,10 +85,16 @@ async function buildProxy(projectId, groupId, angle, emit) {
   } catch (e) {
     fs.rmSync(tmp, { force: true });
     emit({ groupId, angle, state: e.message === 'cancelled' ? 'cancelled' : 'error', pct: 0, error: e.message });
-  } finally { if (held) release(); proxyJobs.delete(key); }
+  } finally {
+    if (held) release();
+    proxyJobs.delete(key);
+    staging.remove(projectId, groupId, angle, f);
+  }
 }
+// Is a local-copy job queued or running for this camera file?
+const proxyClaimed = (groupId, angle) => proxyJobs.has(`${groupId}_${angle}`);
 function cancelProxies() { for (const ac of proxyJobs.values()) ac.abort(); }
-function removeProxies(projectId) { fs.rmSync(path.join(store.dir(projectId), 'proxies'), { recursive: true, force: true }); }
+function removeProxies(projectId) { for (const d of ['proxies', 'staging']) fs.rmSync(path.join(store.dir(projectId), d), { recursive: true, force: true }); }
 
 // ---------- SHA-256 fingerprints ----------
 let hashAbort = null;
@@ -129,4 +143,4 @@ async function hashFiles(projectId, emit) {
 }
 function cancelHash() { if (hashAbort) hashAbort.abort(); }
 
-module.exports = { freeBytes, buildProxy, cancelProxies, removeProxies, hashFiles, cancelHash };
+module.exports = { freeBytes, DISK_RESERVE, proxyClaimed, buildProxy, cancelProxies, removeProxies, hashFiles, cancelHash };

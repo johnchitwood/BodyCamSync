@@ -8,6 +8,8 @@ const store = require('./store');
 const dsp = require('./dsp');
 const { readSoundTrackNames } = require('./mp4names');
 const playback = require('./playback');
+const staging = require('./staging');
+const jobs = require('./jobs');
 
 const EXTRACT_VERSION = 2;
 const SYNC_VERSION = 1;
@@ -33,15 +35,29 @@ function projectName(folder) {
 }
 
 // ---------- audio extraction ----------
-async function extractGroupAudio(g, pdir, emit, label) {
+function audioSource(g) {
   // Use the smallest original file that has audio to minimise reads from slow drives.
   const cands = g.files.filter((f) => f.audio.length && !f.derivative).sort((a, b) => a.size - b.size);
-  const src = cands[0] || g.files.filter((f) => f.audio.length).sort((a, b) => a.size - b.size)[0];
+  return cands[0] || g.files.filter((f) => f.audio.length).sort((a, b) => a.size - b.size)[0];
+}
+
+// `stageFor`: a case id when this file should first be copied to this computer (see staging.js), else null.
+async function extractGroupAudio(g, pdir, emit, label, stageFor = null) {
+  const src = audioSource(g);
   if (!src) return null;
   const out = path.join(pdir, 'audio', g.id);
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
-  const args = ['-i', src.path];
+  let input = src.path, fingerprint = null, readShare = 0;
+  if (stageFor) {
+    readShare = 0.7;
+    try {
+      const st = await staging.stage(stageFor, g.id, src.angle, src, { onProgress: (p) => emit(label, p * readShare) });
+      input = st.path;
+      fingerprint = { sha256: st.sha256, size: src.size, mtimeMs: src.mtimeMs, at: Date.now() };
+    } catch (_) { input = src.path; } // fall back to reading the original directly
+  }
+  const args = ['-i', input];
   for (const a of src.audio) {
     args.push('-map', `0:a:${a.index}`, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav', path.join(out, `s${a.index}.wav`));
     // playback copy: a lossless 16-bit FLAC always; for AAC also the original track copied unchanged, which replaces
@@ -49,7 +65,7 @@ async function extractGroupAudio(g, pdir, emit, label) {
     args.push('-map', `0:a:${a.index}`, '-vn', '-c:a', 'flac', '-sample_fmt', 's16', '-compression_level', '4', path.join(out, `p${a.index}.flac`));
     if (playback.canCopy(a)) args.push('-map', `0:a:${a.index}`, '-vn', '-c:a', 'copy', path.join(out, `p${a.index}.m4a`));
   }
-  await media.runFfmpeg(media.FFMPEG, args, { duration: src.duration, onProgress: (p) => emit(label, p) });
+  await media.runFfmpeg(media.FFMPEG, args, { duration: src.duration, onProgress: (p) => emit(label, readShare + p * (1 - readShare)) });
 
   const tracks = [];
   for (const a of src.audio) {
@@ -73,7 +89,7 @@ async function extractGroupAudio(g, pdir, emit, label) {
     }
     tracks.push({ index: a.index, name: a.name, friendly: a.friendly, channels: a.channels, silent, rms: Math.round(level * 10) / 10, wav: wavPath, flac: null, env: pooled, envHop: 0.5 });
   }
-  return { source: src.name, sourceKey: fileKey(src), tracks, duration: src.duration };
+  return { source: src.name, sourceKey: fileKey(src), tracks, duration: src.duration, fingerprint: fingerprint && { path: src.path, ...fingerprint } };
 }
 
 // ---------- pairwise sync ----------
@@ -111,14 +127,26 @@ function makePool(n) {
 
 function isStrong(r) { return r && r.ok && r.agree >= 10 && r.spreadMs <= 12; }
 
+// How many camera pairs to match at once. Each one needs roughly 18 bytes of memory per sample of the longer
+// recording (about 0.5 GB for 30 minutes) and one processor core; leave some of both for the rest of the app.
+function syncWorkers(groups) {
+  const os = require('os');
+  const longest = Math.max(1, ...groups.map((g) => g.duration || 0));
+  const perPair = longest * 16000 * 18 + 64e6;
+  const byMem = Math.floor((os.freemem() * 0.6) / perPair);
+  const byCpu = (os.cpus() || []).length - 2;
+  return Math.max(1, Math.min(8, byCpu, byMem, (groups.length * (groups.length - 1)) / 2));
+}
+
 async function syncGroups(groups, emit) {
-  const wp = makePool(2);
+  const n = syncWorkers(groups);
+  const wp = makePool(n);
   const pairs = [];
   for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) pairs.push([i, j]);
   let done = 0;
   const edges = [];
   try {
-    await pool(pairs, 2, async ([i, j]) => {
+    await pool(pairs, n, async ([i, j]) => {
       const A = groups[i].tracks.filter((t) => !t.silent);
       const B = groups[j].tracks.filter((t) => !t.silent);
       let best = null;
@@ -226,7 +254,7 @@ async function analyze(folder, { emit, force = false, files: selected = null }) 
   const todo = [];
   for (const g of groups) {
     const pg = prevGroups.get(g.id);
-    const src = g.files.filter((f) => f.audio.length && !f.derivative).sort((a, b) => a.size - b.size)[0] || g.files.filter((f) => f.audio.length).sort((a, b) => a.size - b.size)[0];
+    const src = audioSource(g);
     const reusable = pg && pg.extractVersion === EXTRACT_VERSION && src && pg.sourceKey === fileKey(src) && pg.tracks && pg.tracks.every((t) => fs.existsSync(t.wav) && (t.silent || playback.playbackPath(t)));
     if (reusable) {
       // refresh display names from the (possibly newer) file summary
@@ -241,9 +269,32 @@ async function analyze(folder, { emit, force = false, files: selected = null }) 
     const sum = todo.reduce((p, g) => p + (frac.get(g.id) || 0), 0);
     send('audio', 'Preparing audio', 0.05 + 0.55 * (sum / Math.max(1, todo.length)), [...frac.entries()].filter(([, v]) => v < 1).map(([k]) => groups.find((x) => x.id === k).label).join(', '));
   };
+  // Which files to copy to this computer first, so the local video copy made next doesn't read the drive again:
+  // only where that copy will be made automatically (same rules as the Playback tab), and only with room to spare.
+  const prefs = (prev && prev.prefs) || {};
+  const toStage = new Set();
+  if (prefs.autoProxies !== false && process.env.BCS_NO_STAGING !== '1') {
+    const watched = groups.filter((g) => !(prefs.visible && prefs.visible[g.id] === false));
+    const est = watched.reduce((a, g) => a + (g.duration || 0) * 5e6 / 8 * 1.15, 0);
+    let room = jobs.freeBytes() - est - 25e9;
+    if (est <= 8e9) {
+      for (const g of todo) {
+        if (!watched.includes(g)) continue;
+        const src = audioSource(g);
+        const shown = (prefs.angle && prefs.angle[g.id]) || (g.files[0] && g.files[0].angle);
+        if (!src || src.angle !== shown) continue;
+        if (fs.existsSync(path.join(pdir, 'proxies', `${g.id}_${src.angle}.mp4`))) continue;
+        if (room - src.size < 0) continue;
+        room -= src.size;
+        toStage.add(g.id);
+      }
+    }
+  }
+  const fingerprints = [];
   if (todo.length) {
     await pool(todo, 2, async (g) => {
-      const r = await extractGroupAudio(g, pdir, (_, p) => { frac.set(g.id, p); reportAudio(); }, g.label);
+      const r = await extractGroupAudio(g, pdir, (_, p) => { frac.set(g.id, p); reportAudio(); }, g.label, toStage.has(g.id) ? id : null);
+      if (r && r.fingerprint) fingerprints.push(r.fingerprint);
       if (!r) { g.tracks = []; g.audioSource = null; g.extractVersion = EXTRACT_VERSION; frac.set(g.id, 1); return; }
       g.tracks = r.tracks; g.audioSource = r.source; g.sourceKey = r.sourceKey; g.extractVersion = EXTRACT_VERSION;
       frac.set(g.id, 1); finished++; reportAudio();
@@ -276,7 +327,13 @@ async function analyze(folder, { emit, force = false, files: selected = null }) 
     prefs: (prev && prev.prefs) || {},
     hashes: (prev && prev.hashes) || {},
   };
+  // Fingerprints taken while copying (the same bytes the Files tab would read), so those files needn't be read again.
+  for (const fp of fingerprints) { const { path: p, ...rest } = fp; project.hashes[p] = rest; }
   store.save(id, project);
+  // Temporary copies that no local-copy job picks up within a minute (copies turned off, not enough room, another
+  // case opened) are deleted, as are any left from other cases.
+  staging.sweep(id);
+  if (toStage.size) setTimeout(() => staging.sweepUnclaimed(id, jobs.proxyClaimed), 60000).unref();
   send('done', 'Ready', 1);
   return project;
 }

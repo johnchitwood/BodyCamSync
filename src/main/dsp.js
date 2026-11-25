@@ -44,8 +44,8 @@ function twiddles(n) {
     sin[i] = Math.sin(a);
   }
   t = { cos, sin };
-  // keep only the most recent size to bound memory
-  twCache.clear();
+  // keep the few most recent sizes (one whole-recording size and one window size per pair) to bound memory
+  if (twCache.size >= 3) twCache.delete(twCache.keys().next().value);
   twCache.set(n, t);
   return t;
 }
@@ -232,9 +232,23 @@ function slope(used) {
 }
 
 // Main entry: samples are Int16Array at 16 kHz.
+// The whole-recording search only has to land within the validation margin (1 s), so it runs at 1 kHz; the result
+// is then measured at full 16 kHz in 36 windows exactly as before. If that doesn't give a clear match, the search is
+// repeated at 4 kHz (the earlier setting) and the better of the two is kept, so a hard pair gets at least the same
+// effort as before.
 function correlatePair(a16i, b16i, opts = {}) {
+  if (opts.coarseFactor) return correlateAt(a16i, b16i, opts);
+  const fast = correlateAt(a16i, b16i, { ...opts, coarseFactor: 16 });
+  if (fast.ok && fast.agree >= 8 && fast.agree / Math.max(1, fast.good) >= 0.8) return fast;
+  const slow = correlateAt(a16i, b16i, { ...opts, coarseFactor: 4 });
+  if (!fast.ok) return slow;
+  if (!slow.ok) return fast;
+  return slow.score > fast.score ? slow : fast;
+}
+
+function correlateAt(a16i, b16i, opts = {}) {
   const sr = 16000;
-  const cfg = Object.assign({ winSec: 15, marginSec: 1.0, windows: 36, zMin: 7, agreeSec: 0.03, minAgree: 3, minFrac: 0.5, coarseFactor: 4, candidates: 4 }, opts);
+  const cfg = Object.assign({ winSec: 15, marginSec: 1.0, windows: 36, zMin: 7, agreeSec: 0.03, minAgree: 3, minFrac: 0.5, coarseFactor: 16, candidates: 4 }, opts);
   const factor = cfg.coarseFactor;
   const csr = sr / factor;
   const aC = toFloat(a16i, factor), bC = toFloat(b16i, factor);
@@ -262,7 +276,7 @@ function correlatePair(a16i, b16i, opts = {}) {
     spreadMs: ev.spreadMs,
     agree: ev.agree, good: ev.good, total: ev.total, fracOfWindows: frac, score,
     driftPpm: slope(ev.used),
-    coarse: best.coarse, tried,
+    coarse: best.coarse, coarseFactor: factor, tried,
     aDur: a16i.length / sr, bDur: b16i.length / sr,
     points: ev.used.map((w) => ({ t: w.t, lag: w.lag })),
   };

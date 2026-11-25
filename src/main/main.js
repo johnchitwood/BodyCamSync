@@ -109,12 +109,13 @@ function buildMenu() {
 
 app.whenReady().then(() => {
   store.init(app.getPath('userData'));
+  require('./staging').sweep(); // temporary copies left by a previous run
   buildMenu();
   createWindow();
   updater.init(() => win);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
-app.on('window-all-closed', () => { jobs.cancelProxies(); jobs.cancelHash(); app.quit(); });
+app.on('window-all-closed', () => { jobs.cancelProxies(); jobs.cancelHash(); setTimeout(() => { require('./staging').sweep(); app.quit(); }, 300); });
 
 // ---------- IPC ----------
 ipcMain.handle('dialog:openFolder', async () => {
