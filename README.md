@@ -14,13 +14,20 @@ Click a camera to switch the view and the sound; grid and single-view layouts; f
 - **Original files are never written to.** They are opened read-only. Everything the app makes
   (audio copies, local video copies, sync results, fingerprints) lives in
   `~/Library/Application Support/BodyCamSync/projects/<id>/`.
-- **Sync**: each camera's audio is cross-correlated against the others (GCC-PHAT, `src/main/dsp.js`),
-  checked at ~36 points across the recording; offsets are solved as a graph, with a cross-check
-  between independent matches. Manual nudges (1 ms / 10 ms / 1 frame) are saved per camera.
+- **Sync**: each camera's audio is cross-correlated against the others (GCC-PHAT, `src/main/dsp.js`):
+  a whole-recording search at 1 kHz (repeated at 4 kHz if that gives no clear match), then measured at full
+  16 kHz at ~36 points across the recording; offsets are solved as a graph, with a cross-check
+  between independent matches. Several camera pairs are matched at once (up to 8, limited by processor cores
+  and free memory). Manual nudges (1 ms / 10 ms / 1 frame) are saved per camera.
 - **Playback** (`src/renderer/engine.js`): one master clock; every camera's audio runs continuously
   and only the active one is audible, so switching is a short crossfade, never a seek.
 - **Local copies**: 720p, 15-frame-GOP copies are built in the background (max 2 at once) and swapped in
-  while playing. Seeks drop from ~200 ms (worst >1 s) on a network drive to ~10 ms.
+  while playing. Seeks drop from ~200 ms (worst >1 s) on a network drive to ~10 ms. With an NVIDIA card the
+  frames stay on the card from decoding through resizing to encoding.
+- **One read per original** (`src/main/staging.js`): when a local copy will be made, each original is copied to a
+  temporary file on this computer while its audio is prepared, and its SHA-256 fingerprint is taken from that same
+  read. The audio and the local copy are made from the temporary file, which is deleted when the copy is done (or
+  within a minute if no copy is made). `BCS_NO_STAGING=1` turns this off.
 - **Fingerprints**: Files tab -> SHA-256 of every original, stored with size and modified time.
 
 ## Transcript, speakers, and editing
